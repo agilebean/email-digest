@@ -531,9 +531,13 @@ def batch_browser_unsubscribe(
 
             try:
                 progress.step(
-                    f"Opening unsubscribe URL {idx}/{len(jobs)} in browser — {host} ..."
+                    f"Opening unsubscribe URL {idx}/{len(jobs)} in a new browser tab — {host} ..."
                 )
-                driver.get(url)
+                if idx == 1:
+                    driver.get(url)
+                else:
+                    driver.switch_to.new_window("tab")
+                    driver.get(url)
                 try:
                     handles = driver.window_handles
                     if len(handles) > 1:

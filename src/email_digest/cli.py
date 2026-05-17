@@ -13,11 +13,9 @@ from typing import Any
 import yaml
 
 from unsubscribe.gmail_api_backend import GmailApiBackend
-from unsubscribe.gmail_facade import GmailFacade, headers_from_summary
-from unsubscribe.classifier import is_digest_source_candidate
+from unsubscribe.gmail_facade import GmailFacade
 from unsubscribe.keep_list import (
     add_to_keep_list,
-    is_kept,
     load_keep_list,
     merge_keep_list,
     remove_from_keep_list,
@@ -26,11 +24,10 @@ from unsubscribe.keep_list import (
 
 from email_digest.cache import cost_report_payload, format_cost_report
 from email_digest.config import TopicConfig, load_topic_config
-from email_digest.gmail_query import build_digest_gmail_query
 from email_digest.paths import default_cache_db_path, repo_root
 from email_digest.pipeline import run_digest
 from email_digest.spark_link import spark_deeplink
-from email_digest.walkthrough import run_digest_walkthrough
+from email_digest.walkthrough import run_digest_sources
 
 DEFAULT_KEEP_LIST_PATH = Path.home() / ".unsubscribe_keep.json"
 
@@ -62,41 +59,6 @@ def _digest_run_error_payload(*, topic: str, file: str, error: str) -> dict[str,
 def _print_digest_run_error(*, topic: str, file: str, error: str) -> None:
     print(json.dumps(_digest_run_error_payload(topic=topic, file=file, error=error), indent=2))
 
-
-def _candidate_query_rows(
-    cfg: TopicConfig,
-    facade: GmailFacade,
-    keep: dict[str, dict],
-    *,
-    since: date | None,
-    max_results: int,
-) -> tuple[str, list[dict[str, Any]]]:
-    """Gmail list + per-row JSON for ``digest candidates`` (single topic or ``--all`` item)."""
-    query = build_digest_gmail_query(
-        window_days=cfg.window_days,
-        senders=list(cfg.senders),
-        keywords=list(cfg.keywords),
-        folders=list(cfg.folders),
-        since=since,
-    )
-    rows = facade.list_messages(query, max_results=max_results)
-    rows_out: list[dict[str, Any]] = []
-    for m in rows:
-        h = headers_from_summary(m)
-        sk = sender_key(m.from_)
-        rows_out.append(
-            {
-                "id": m.id,
-                "from": m.from_,
-                "subject": m.subject,
-                "date": m.date,
-                "rfc_message_id": m.rfc_message_id,
-                "digest_source_candidate": is_digest_source_candidate(h),
-                "sender_key": sk,
-                "keep_list_kept": is_kept(keep, m.from_),
-            }
-        )
-    return query, rows_out
 
 
 def _digest_cost(days: int = 7, cache_db: Path | None = None, *, json_out: bool = False) -> int:
@@ -295,204 +257,8 @@ def _digest_run(ns: argparse.Namespace) -> int:
     return 0
 
 
-def _digest_candidates(ns: argparse.Namespace) -> int:
-    """List Gmail headers for topic query(ies) + ``digest_source_candidate`` (no LLM)."""
-    topics_dir: Path = ns.topics_dir or _default_topics_dir()
-    if not ns.all and not ns.topic:
-        print(
-            "Provide a topic name (stem of ``topics/<stem>.yaml``) or use ``--all``.",
-            file=sys.stderr,
-        )
-        return 2
-
-    since: date | None = None
-    if ns.since:
-        try:
-            since = _parse_since(ns.since)
-        except ValueError:
-            print(
-                f"Invalid --since {ns.since!r}; use YYYY-MM-DD (Gregorian calendar date).",
-                file=sys.stderr,
-            )
-            return 2
-
-    if ns.all:
-        actions: list[tuple[object, ...]] = []
-        any_failed = False
-        _ERR, _RUN = object(), object()
-
-        for path in sorted(topics_dir.glob("*.yaml")):
-            try:
-                cfg = load_topic_config(path)
-            except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
-                any_failed = True
-                actions.append(
-                    (
-                        _ERR,
-                        _digest_run_error_payload(
-                            topic=path.stem,
-                            file=path.name,
-                            error=f"config: {e}",
-                        ),
-                    )
-                )
-                continue
-            if ns.strict and cfg.name != path.stem:
-                any_failed = True
-                actions.append(
-                    (
-                        _ERR,
-                        _digest_run_error_payload(
-                            topic=path.stem,
-                            file=path.name,
-                            error=(
-                                f"strict: YAML name {cfg.name!r} must match file stem {path.stem!r} "
-                                "(rename the file or change ``name:``)."
-                            ),
-                        ),
-                    )
-                )
-                continue
-            actions.append((_RUN, cfg, path))
-
-        need_gmail = any(tag is _RUN for tag, *_ in actions)
-        results: list[dict[str, Any]] = []
-        if need_gmail:
-            keep = load_keep_list(ns.keep_list)
-            backend = GmailApiBackend.from_env()
-            facade = GmailFacade(backend)
-            for item in actions:
-                tag = item[0]
-                if tag is _ERR:
-                    results.append(item[1])
-                    continue
-                _, cfg, path = item
-                try:
-                    query, rows_out = _candidate_query_rows(
-                        cfg,
-                        facade,
-                        keep,
-                        since=since,
-                        max_results=ns.max_results,
-                    )
-                    results.append(
-                        {
-                            "topic": cfg.name,
-                            "file": path.name,
-                            "query": query,
-                            "rows": rows_out,
-                        }
-                    )
-                except Exception as e:
-                    any_failed = True
-                    results.append(
-                        _digest_run_error_payload(
-                            topic=cfg.name,
-                            file=path.name,
-                            error=str(e),
-                        )
-                    )
-        else:
-            for item in actions:
-                results.append(item[1])
-
-        print(json.dumps(results, indent=2))
-        return 1 if any_failed else 0
-
-    topic_path = topics_dir / f"{ns.topic}.yaml"
-    try:
-        cfg = load_topic_config(topic_path)
-    except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
-        _print_digest_run_error(
-            topic=str(ns.topic),
-            file=topic_path.name,
-            error=f"config: {e}",
-        )
-        return 1
-    if ns.strict and cfg.name != topic_path.stem:
-        _print_digest_run_error(
-            topic=str(ns.topic),
-            file=topic_path.name,
-            error=(
-                f"strict: YAML name {cfg.name!r} must match file stem {topic_path.stem!r} "
-                "(rename the file or change ``name:``)."
-            ),
-        )
-        return 1
-
-    keep = load_keep_list(ns.keep_list)
-    backend = GmailApiBackend.from_env()
-    facade = GmailFacade(backend)
-    try:
-        query, rows_out = _candidate_query_rows(
-            cfg,
-            facade,
-            keep,
-            since=since,
-            max_results=ns.max_results,
-        )
-    except Exception as e:
-        _print_digest_run_error(
-            topic=cfg.name,
-            file=topic_path.name,
-            error=str(e),
-        )
-        return 1
-    print(
-        json.dumps(
-            {"topic": cfg.name, "file": topic_path.name, "query": query, "rows": rows_out},
-            indent=2,
-        )
-    )
-    return 0
-
-
-def _digest_keep(ns: argparse.Namespace) -> int:
-    """Mutate the shared keep-list JSON (same store as ``digest run`` / unsubscribe)."""
-    path: Path = ns.keep_list
-    if ns.keep_cmd == "add":
-        if sender_key(ns.from_header) is None:
-            print(
-                "Cannot derive a sender address from ``--from``; "
-                "use a valid RFC5322-like From string or bare email.",
-                file=sys.stderr,
-            )
-            return 1
-        add_to_keep_list(path, ns.from_header, ns.subject)
-        return 0
-    if ns.keep_cmd == "remove":
-        if sender_key(ns.from_header) is None:
-            print(
-                "Cannot derive a sender address from ``--from``; "
-                "use a valid RFC5322-like From string or bare email.",
-                file=sys.stderr,
-            )
-            return 1
-        remove_from_keep_list(path, ns.from_header)
-        return 0
-    if ns.keep_cmd == "merge":
-        try:
-            raw = json.loads(ns.merge_file.read_text(encoding="utf-8"))
-        except OSError as e:
-            print(f"Cannot read --file: {e}", file=sys.stderr)
-            return 1
-        except json.JSONDecodeError as e:
-            print(f"Invalid JSON in --file: {e}", file=sys.stderr)
-            return 1
-        try:
-            merge_keep_list(path, raw)
-        except TypeError as e:
-            print(str(e), file=sys.stderr)
-            return 1
-        except ValueError as e:
-            print(str(e), file=sys.stderr)
-            return 1
-        return 0
-    return 2
-
-
-def _digest_walkthrough(ns: argparse.Namespace) -> int:
-    """Terminal walkthrough: digest-source candidates for one topic → shared keep list."""
+def _digest_sources(ns: argparse.Namespace) -> int:
+    """Interactive review of digest-source candidates for one or all topics (replaces old ``candidates`` + ``walkthrough``)."""
     topics_dir: Path = ns.topics_dir or _default_topics_dir()
     if not ns.all and not ns.topic:
         print(
@@ -547,14 +313,14 @@ def _digest_walkthrough(ns: argparse.Namespace) -> int:
                 if tag is _ERR:
                     _, topic, file, error = item
                     print(
-                        f"Walkthrough — topic {topic!r} ({file}): {error}",
+                        f"Sources — topic {topic!r} ({file}): {error}",
                         file=sys.stderr,
                         flush=True,
                     )
                     continue
                 _, cfg, path = item
                 try:
-                    rc = run_digest_walkthrough(
+                    rc = run_digest_sources(
                         cfg,
                         path,
                         facade,
@@ -563,6 +329,7 @@ def _digest_walkthrough(ns: argparse.Namespace) -> int:
                         max_results=ns.max_results,
                         input_fn=input,
                         body=ns.body,
+                        new_only=ns.new,
                     )
                     if rc != 0:
                         any_failed = True
@@ -572,7 +339,7 @@ def _digest_walkthrough(ns: argparse.Namespace) -> int:
             for item in actions:
                 _, topic, file, error = item
                 print(
-                    f"Walkthrough — topic {topic!r} ({file}): {error}",
+                    f"Sources — topic {topic!r} ({file}): {error}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -602,7 +369,7 @@ def _digest_walkthrough(ns: argparse.Namespace) -> int:
 
     backend = GmailApiBackend.from_env()
     facade = GmailFacade(backend)
-    return run_digest_walkthrough(
+    return run_digest_sources(
         cfg,
         topic_path,
         facade,
@@ -611,7 +378,52 @@ def _digest_walkthrough(ns: argparse.Namespace) -> int:
         max_results=ns.max_results,
         input_fn=input,
         body=ns.body,
+        new_only=ns.new,
     )
+
+
+def _digest_keep(ns: argparse.Namespace) -> int:
+    """Mutate the shared keep-list JSON (same store as ``digest run`` / unsubscribe)."""
+    path: Path = ns.keep_list
+    if ns.keep_cmd == "add":
+        if sender_key(ns.from_header) is None:
+            print(
+                "Cannot derive a sender address from ``--from``; "
+                "use a valid RFC5322-like From string or bare email.",
+                file=sys.stderr,
+            )
+            return 1
+        add_to_keep_list(path, ns.from_header, ns.subject)
+        return 0
+    if ns.keep_cmd == "remove":
+        if sender_key(ns.from_header) is None:
+            print(
+                "Cannot derive a sender address from ``--from``; "
+                "use a valid RFC5322-like From string or bare email.",
+                file=sys.stderr,
+            )
+            return 1
+        remove_from_keep_list(path, ns.from_header)
+        return 0
+    if ns.keep_cmd == "merge":
+        try:
+            raw = json.loads(ns.merge_file.read_text(encoding="utf-8"))
+        except OSError as e:
+            print(f"Cannot read --file: {e}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON in --file: {e}", file=sys.stderr)
+            return 1
+        try:
+            merge_keep_list(path, raw)
+        except TypeError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        return 0
+    return 2
 
 
 def _digest_spark_check(ns: argparse.Namespace) -> int:
@@ -739,49 +551,60 @@ def _main_digest(argv: list[str]) -> int:
         help="SQLite cache path (default: <repo>/cache/digest.sqlite)",
     )
 
-    cand_p = sub.add_parser(
-        "candidates",
-        help="List Gmail messages for a topic query (JSON + digest_source_candidate; no LLM)",
+    sources_p = sub.add_parser(
+        "sources",
+        help="Review digest-source candidates interactively; [Enter] keep, [u] unsubscribe, [s] skip, [q] quit",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "topic",
         nargs="?",
         default=None,
         help="Topic stem (``topics/<stem>.yaml``); omit when using ``--all``",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--all",
         action="store_true",
-        help="List for every ``*.yaml`` in the topics directory; JSON array; exit 1 if any topic failed",
+        help="Review sources for every ``*.yaml`` in the topics directory; config/strict errors printed to stderr, walkthrough continues to next topic; exit 1 if any topic failed",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--strict",
         action="store_true",
         help="Require YAML ``name`` to match the file stem (same as ``digest run --strict``)",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--topics-dir",
         type=Path,
         default=None,
         help="Override topics directory (default: <repo>/topics)",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--since",
         type=str,
         default=None,
         help="Lower date bound YYYY-MM-DD (maps to Gmail ``after:``)",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--max-results",
         type=int,
         default=50,
         help="Cap for Gmail ``messages.list`` (default 50)",
     )
-    cand_p.add_argument(
+    sources_p.add_argument(
         "--keep-list",
         type=Path,
         default=DEFAULT_KEEP_LIST_PATH,
         help=f"Keep-list JSON (default: {DEFAULT_KEEP_LIST_PATH})",
+    )
+    sources_p.add_argument(
+        "--new",
+        action="store_true",
+        dest="new",
+        help="Only show sources not already on the keep list",
+    )
+    sources_p.add_argument(
+        "--body",
+        action="store_true",
+        help="Prefetch plain-text message bodies in parallel and show a preview (extra Gmail API calls)",
     )
 
     keep_p = sub.add_parser(
@@ -844,56 +667,6 @@ def _main_digest(argv: list[str]) -> int:
         help=f"Keep-list JSON (default: {DEFAULT_KEEP_LIST_PATH})",
     )
 
-    walk_p = sub.add_parser(
-        "walkthrough",
-        help="Step through digest-source candidates for a topic; [Enter] adds sender to the shared keep list",
-    )
-    walk_p.add_argument(
-        "topic",
-        nargs="?",
-        default=None,
-        help="Topic stem (``topics/<stem>.yaml``); omit when using ``--all``",
-    )
-    walk_p.add_argument(
-        "--all",
-        action="store_true",
-        help="Walk through every ``*.yaml`` in the topics directory; config/strict errors printed to stderr, walkthrough continues to next topic; exit 1 if any topic failed",
-    )
-    walk_p.add_argument(
-        "--strict",
-        action="store_true",
-        help="Require YAML ``name`` to match the file stem (same as ``digest run --strict``)",
-    )
-    walk_p.add_argument(
-        "--topics-dir",
-        type=Path,
-        default=None,
-        help="Override topics directory (default: <repo>/topics)",
-    )
-    walk_p.add_argument(
-        "--since",
-        type=str,
-        default=None,
-        help="Lower date bound YYYY-MM-DD (maps to Gmail ``after:``)",
-    )
-    walk_p.add_argument(
-        "--max-results",
-        type=int,
-        default=50,
-        help="Cap for Gmail ``messages.list`` (default 50)",
-    )
-    walk_p.add_argument(
-        "--keep-list",
-        type=Path,
-        default=DEFAULT_KEEP_LIST_PATH,
-        help=f"Keep-list JSON (default: {DEFAULT_KEEP_LIST_PATH})",
-    )
-    walk_p.add_argument(
-        "--body",
-        action="store_true",
-        help="Prefetch plain-text message bodies in parallel and show a preview during the walkthrough (extra Gmail API calls)",
-    )
-
     spark_p = sub.add_parser(
         "spark-check",
         help="Print a readdle-spark:// URL for manual paste into Spark (device check; no Gmail or network)",
@@ -913,12 +686,10 @@ def _main_digest(argv: list[str]) -> int:
         return _digest_cost(ns.days, ns.cache_db, json_out=ns.json)
     if ns.cmd == "topics":
         return _digest_topics(ns)
-    if ns.cmd == "candidates":
-        return _digest_candidates(ns)
+    if ns.cmd == "sources":
+        return _digest_sources(ns)
     if ns.cmd == "keep":
         return _digest_keep(ns)
-    if ns.cmd == "walkthrough":
-        return _digest_walkthrough(ns)
     if ns.cmd == "spark-check":
         return _digest_spark_check(ns)
     if ns.cmd == "run":
@@ -934,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         print(
             "Usage: python -m email_digest [--version|-V] digest "
-            "<candidates|cost|keep|spark-check|topics|run|version|walkthrough …> | "
+            "<cost|keep|sources|spark-check|topics|run|version> | "
             "python -m email_digest unsubscribe [check …]",
             file=sys.stderr,
         )

@@ -1,4 +1,4 @@
-"""Tests for ``digest walkthrough`` (topic-scoped keep-list review)."""
+"""Tests for ``digest sources`` (topic-scoped source review)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from email_digest.config import load_topic_config
-from email_digest.walkthrough import run_digest_walkthrough, _body_preview_lines
+from email_digest.walkthrough import run_digest_sources, _body_preview_lines
 from unsubscribe.gmail_facade import GmailHeaderSummary
 
 
@@ -46,7 +46,7 @@ def _newsletter_summary(
     )
 
 
-def test_run_digest_walkthrough_no_candidates_returns_0(
+def test_run_digest_sources_no_candidates_returns_0(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     td = tmp_path / "tw"
@@ -71,7 +71,7 @@ def test_run_digest_walkthrough_no_candidates_returns_0(
             rfc_message_id="<h@x.com>",
         )
     ]
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg,
         p,
         facade,
@@ -81,10 +81,10 @@ def test_run_digest_walkthrough_no_candidates_returns_0(
         input_fn=lambda _: pytest.fail("no prompts when empty"),
     )
     assert rc == 0
-    assert "No digest-source candidates" in capsys.readouterr().out
+    assert "No candidates to review" in capsys.readouterr().out
 
 
-def test_run_digest_walkthrough_keep_skip_quit(tmp_path: Path) -> None:
+def test_run_digest_sources_keep_skip_quit(tmp_path: Path) -> None:
     td = tmp_path / "tw2"
     td.mkdir()
     p = td / "solo.yaml"
@@ -104,7 +104,7 @@ def test_run_digest_walkthrough_keep_skip_quit(tmp_path: Path) -> None:
     def _inp(_: str) -> str:
         return next(inputs)
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50, input_fn=_inp
     )
     assert rc == 0
@@ -114,7 +114,7 @@ def test_run_digest_walkthrough_keep_skip_quit(tmp_path: Path) -> None:
     assert data["a@x.com"]["subject"] == "One"
 
 
-def test_run_digest_walkthrough_skips_already_kept(
+def test_run_digest_sources_skips_already_kept(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     td = tmp_path / "tw3"
@@ -131,7 +131,7 @@ def test_run_digest_walkthrough_skips_already_kept(
     )
     facade = MagicMock()
     facade.list_messages.return_value = [_newsletter_summary()]
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg,
         p,
         facade,
@@ -141,10 +141,10 @@ def test_run_digest_walkthrough_skips_already_kept(
         input_fn=lambda _: pytest.fail("no prompt when only already-kept"),
     )
     assert rc == 0
-    assert "already in keep list" in capsys.readouterr().out
+    assert "Already kept" in capsys.readouterr().out
 
 
-def test_run_digest_walkthrough_list_error_returns_1(
+def test_run_digest_sources_list_error_returns_1(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     td = tmp_path / "tw4"
@@ -157,7 +157,7 @@ def test_run_digest_walkthrough_list_error_returns_1(
     facade = MagicMock()
     facade.list_messages.side_effect = RuntimeError("api down")
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg,
         p,
         facade,
@@ -170,7 +170,7 @@ def test_run_digest_walkthrough_list_error_returns_1(
     assert "api down" in capsys.readouterr().err
 
 
-def test_run_digest_walkthrough_keyboard_interrupt_returns_130(
+def test_run_digest_sources_keyboard_interrupt_returns_130(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     td = tmp_path / "tw5"
@@ -186,7 +186,7 @@ def test_run_digest_walkthrough_keyboard_interrupt_returns_130(
     def _inp(_: str) -> str:
         raise KeyboardInterrupt
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50, input_fn=_inp
     )
     assert rc == 130
@@ -199,7 +199,7 @@ def test_digest_walkthrough_cli_no_topic_returns_2(
     from email_digest.cli import main
 
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
-        rc = main(["digest", "walkthrough"])
+        rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
     assert "topic" in capsys.readouterr().err.lower()
@@ -219,7 +219,7 @@ def test_walkthrough_no_body_flag_does_not_call_get_body(
     facade.list_messages.return_value = [_newsletter_summary()]
     facade.get_message_body_text.return_value = "some body text"
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50,
         input_fn=lambda _: "s", body=False,
     )
@@ -249,7 +249,7 @@ def test_walkthrough_body_flag_prefetches_and_shows_preview(
     def _inp(_: str) -> str:
         return next(inputs)
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50,
         input_fn=_inp, body=True,
     )
@@ -277,7 +277,7 @@ def test_walkthrough_body_fetch_error_continues(
     facade.list_messages.return_value = [_newsletter_summary(id_="bad")]
     facade.get_message_body_text.side_effect = RuntimeError("timeout")
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50,
         input_fn=lambda _: "s", body=True,
     )
@@ -309,7 +309,7 @@ def test_walkthrough_body_quit_shuts_down_pool(
     def _inp(_: str) -> str:
         return next(inputs)
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50,
         input_fn=_inp, body=True,
     )
@@ -355,7 +355,7 @@ def test_walkthrough_body_flag_skips_body_fetch_for_already_kept(
     def _inp(_: str) -> str:
         return next(inputs)
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50,
         input_fn=_inp, body=True,
     )
@@ -369,7 +369,7 @@ def test_walkthrough_cli_all_no_topic_or_all_arg(
     from email_digest.cli import main
 
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
-        rc = main(["digest", "walkthrough"])
+        rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
     assert "--all" in capsys.readouterr().err
@@ -383,7 +383,7 @@ def test_walkthrough_cli_all_empty_dir(
     td = tmp_path / "topics"
     td.mkdir()
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
-        rc = main(["digest", "walkthrough", "--all", "--topics-dir", str(td)])
+        rc = main(["digest", "sources", "--all", "--topics-dir", str(td)])
     assert rc == 0
     from_env.assert_not_called()
 
@@ -402,7 +402,7 @@ def test_walkthrough_cli_all_config_errors(
 
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
         rc = main([
-            "digest", "walkthrough", "--all",
+            "digest", "sources", "--all",
             "--topics-dir", str(td),
             "--keep-list", str(keep),
         ])
@@ -432,7 +432,7 @@ def test_walkthrough_cli_all_mixed_success_and_failure(
         backend.list_messages.return_value = [_newsletter_summary()]
         fake_be.return_value = backend
         rc = main([
-            "digest", "walkthrough", "--all",
+            "digest", "sources", "--all",
             "--topics-dir", str(td),
             "--keep-list", str(keep),
             "--max-results", "5",
@@ -461,7 +461,7 @@ def test_walkthrough_cli_all_both_topics_good(
         backend.list_messages.return_value = [_newsletter_summary()]
         fake_be.return_value = backend
         rc = main([
-            "digest", "walkthrough", "--all",
+            "digest", "sources", "--all",
             "--topics-dir", str(td),
             "--keep-list", str(keep),
             "--max-results", "5",
@@ -483,7 +483,7 @@ def test_walkthrough_cli_all_invalid_since(
 
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
         rc = main([
-            "digest", "walkthrough", "--all",
+            "digest", "sources", "--all",
             "--topics-dir", str(td),
             "--keep-list", str(keep),
             "--since", "not-a-date",
@@ -514,11 +514,12 @@ def test_walkthrough_shortlist_shown_before_prompts(
     def _inp(_: str) -> str:
         return next(inputs)
 
-    rc = run_digest_walkthrough(
+    rc = run_digest_sources(
         cfg, p, facade, keep, since=None, max_results=50, input_fn=_inp
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert "2 candidate(s)" in out
-    assert "1. A <a@x.com>" in out
-    assert "2. B <b@y.com>" in out
+    assert "2 candidates" in out
+    assert "A <a@x.com>" in out
+    assert "B <b@y.com>" in out
+    assert "  #  Status" in out  # table header present

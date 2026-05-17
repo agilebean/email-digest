@@ -10,10 +10,34 @@ import numpy as np
 
 from unsubscribe.gmail_facade import GmailHeaderSummary, GmailTransportError
 
-from email_digest.config import load_topic_config
+from email_digest.config import TopicConfig, load_topic_config
 from email_digest.pipeline import run_digest, run_digest_dry_run
 
 _TOPICS = Path(__file__).resolve().parent.parent / "topics"
+
+
+def _minimal_topic_cfg(tmp_path: Path, *, name: str = "ai") -> TopicConfig:
+    """Create a minimal topic config without keywords so test subjects aren't filtered."""
+    td = tmp_path / "topics"
+    td.mkdir(exist_ok=True)
+    p = td / f"{name}.yaml"
+    p.write_text(
+        f"""
+name: {name}
+display_name: "{name}"
+senders:
+  - "digest@news.com"
+window_days: 7
+extract_model: fast
+synthesize_model: smart
+persona_prompt: "p"
+output:
+  template: digest_html
+  also_email_to: "self"
+""",
+        encoding="utf-8",
+    )
+    return load_topic_config(p)
 
 
 def _summary(
@@ -40,7 +64,7 @@ def _summary(
 
 
 def test_dry_run_filters_by_keep_list(tmp_path: Path) -> None:
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps(
@@ -99,7 +123,7 @@ def test_digest_messages_carry_digest_source_candidate(
     tmp_path: Path,
 ) -> None:
     """Slice F / R3: same classifier signal as ``digest candidates``, on each pipeline message."""
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps(
@@ -151,7 +175,7 @@ def test_digest_skips_llm_when_non_candidate_but_cache_wins(
     tmp_path: Path,
 ) -> None:
     """SQLite cache must still apply when list metadata would skip extraction (Slice G)."""
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),
@@ -188,7 +212,7 @@ def test_digest_skips_llm_when_non_candidate_but_cache_wins(
 
 
 def test_extraction_cache_skips_html_and_llm(tmp_path: Path) -> None:
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),
@@ -228,7 +252,7 @@ def test_extraction_cache_skips_html_and_llm(tmp_path: Path) -> None:
 
 
 def test_trending_clusters_with_stubbed_embed_and_cluster(tmp_path: Path) -> None:
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),
@@ -283,7 +307,7 @@ def test_trending_clusters_with_stubbed_embed_and_cluster(tmp_path: Path) -> Non
 
 def test_per_message_failure_logged_and_run_continues(tmp_path: Path) -> None:
     """One bad Gmail fetch must not abort the pipeline; failure is appended to _failures log."""
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),
@@ -339,7 +363,7 @@ def test_per_message_failure_logged_and_run_continues(tmp_path: Path) -> None:
 
 
 def test_full_digest_writes_html(tmp_path: Path) -> None:
-    cfg = load_topic_config(_TOPICS / "ai.yaml")
+    cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),

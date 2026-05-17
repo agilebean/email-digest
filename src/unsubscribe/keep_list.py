@@ -1,4 +1,5 @@
-"""Local keep-list (~/.unsubscribe_keep.json) for senders the user chose to keep."""
+"""Local keep-list (~/.unsubscribe_keep.json) for senders the user chose to keep,
+plus unsubscribed-list (~/.unsubscribed.json) for senders already unsubscribed from."""
 
 from __future__ import annotations
 
@@ -16,6 +17,9 @@ def sender_key(from_header: str) -> str | None:
     if not a:
         return None
     return a.lower()
+
+
+# ── Keep list ────────────────────────────────────────────────────────────────
 
 
 def is_kept(keep_list: dict[str, dict], from_header: str) -> bool:
@@ -83,3 +87,47 @@ def merge_keep_list(path: Path, fragment: dict[str, Any]) -> None:
             "date_kept": str(v.get("date_kept", today)),
         }
     save_keep_list(path, data)
+
+
+# ── Unsubscribed list ────────────────────────────────────────────────────────
+
+DEFAULT_UNSUBSCRIBED_PATH = Path.home() / ".unsubscribed.json"
+
+
+def _load_json(path: Path) -> dict[str, dict]:
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return {}
+    raw = path.read_text(encoding="utf-8").strip() or "{}"
+    return dict(json.loads(raw))
+
+
+def _save_json(path: Path, data: dict[str, dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def load_unsubscribed_list(path: Path | None = None) -> dict[str, dict]:
+    """Load unsubscribed senders; returns ``{address: {subject, date_unsubscribed}}``."""
+    return _load_json(path or DEFAULT_UNSUBSCRIBED_PATH)
+
+
+def is_unsubscribed(data: dict[str, dict], from_header: str) -> bool:
+    key = sender_key(from_header)
+    if key is None:
+        return False
+    return key in data
+
+
+def add_to_unsubscribed_list(
+    path: Path | None, from_header: str, subject: str
+) -> None:
+    """Record a sender as unsubscribed (after successful browser/one-click unsubscribe)."""
+    key = sender_key(from_header)
+    if key is None:
+        return
+    p = path or DEFAULT_UNSUBSCRIBED_PATH
+    data = _load_json(p)
+    data[key] = {"subject": subject, "date_unsubscribed": date.today().isoformat()}
+    _save_json(p, data)

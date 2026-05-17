@@ -1,4 +1,4 @@
-"""Topic-scoped terminal walkthrough: add digest sources to the shared keep list."""
+"""Topic-scoped terminal walkthrough: review digest sources, update keep list, optionally unsubscribe."""
 
 from __future__ import annotations
 
@@ -9,8 +9,20 @@ from datetime import date
 from pathlib import Path
 
 from unsubscribe.classifier import is_digest_source_candidate
+from unsubscribe.execution import (
+    debugger_address_from_env,
+    print_unsubscribe_report,
+    run_automated_unsubscribe,
+)
 from unsubscribe.gmail_facade import GmailFacade, headers_from_summary
-from unsubscribe.keep_list import add_to_keep_list, is_kept, load_keep_list
+from unsubscribe.keep_list import (
+    add_to_keep_list,
+    add_to_unsubscribed_list,
+    is_kept,
+    is_unsubscribed,
+    load_keep_list,
+    load_unsubscribed_list,
+)
 
 from email_digest.config import TopicConfig
 from email_digest.gmail_query import build_digest_gmail_query
@@ -64,21 +76,78 @@ def _start_body_prefetch(
     return executor, futures
 
 
-def _prompt_keep_skip_quit(prompt: str, *, input_fn: Callable[[str], str]) -> str:
-    """Return ``''`` (keep), ``'s'`` (skip), or ``'q'`` (quit)."""
+def _prompt_sources(prompt: str, *, input_fn: Callable[[str], str]) -> str:
+    """Return ``''`` (keep), ``'u'`` (unsubscribe), ``'s'`` (skip), or ``'q'`` (quit)."""
     while True:
         raw = input_fn(prompt)
         s = raw.strip().lower()
         if s == "":
             return ""
+        if s == "u":
+            return "u"
         if s == "s":
             return "s"
         if s == "q":
             return "q"
-        print("  (Enter = keep, s = skip, q = quit — try again.)", flush=True)
+        print("  (Enter = keep, u = unsubscribe, s = skip, q = quit — try again.)", flush=True)
 
 
-def run_digest_walkthrough(
+def _print_selection_summary(
+    num_unsub: int,
+    num_kept: int,
+) -> None:
+    """Print summary of user selections from the walkthrough."""
+    print()
+    if num_unsub:
+        print(f"Selected for unsubscribe: {num_unsub}")
+    if num_kept:
+        print(f"Added to keep list: {num_kept}")
+    if num_unsub == 0 and num_kept == 0:
+        print("No selections made.")
+    print()
+
+
+def _format_sources_table(
+    messages: list,
+    keep_data: dict,
+    *,
+    unsubscribed_data: dict | None = None,
+    from_width: int = 36,
+    preview_width: int = 64,
+) -> str:
+    """Format messages as a human-readable aligned table."""
+    unsub = unsubscribed_data or {}
+    rows: list[tuple[int, str, str, str]] = []
+    for i, m in enumerate(messages, start=1):
+        if is_kept(keep_data, m.from_):
+            status = "kept"
+        elif is_unsubscribed(unsub, m.from_):
+            status = "unsub'd"
+        else:
+            status = "new"
+        snip = (m.snippet or "").replace("\n", " ").strip()[:preview_width - 10]
+        preview = f"{m.subject!r}"
+        if snip:
+            preview += f" :: {snip}"
+        rows.append((i, status, m.from_, preview))
+
+    num_w = max(len(str(rows[-1][0])), 2) if rows else 2
+    status_w = max(len(r[1]) for r in rows) if rows else 6
+
+    header = f"  {'#':>{num_w}}  {'Status':<{status_w}}  {'From':<{from_width}}  Subject / Preview"
+    sep = "  " + "─" * (len(header) - 2)
+    lines = [header, sep]
+
+    for num, status, from_, preview in rows:
+        from_d = from_[:from_width]
+        prev_d = preview[:preview_width]
+        lines.append(
+            f"  {num:>{num_w}}  {status:<{status_w}}  {from_d:<{from_width}}  {prev_d}"
+        )
+    return "\n".join(lines)
+
+
+def run_digest_sources(
     cfg: TopicConfig,
     topic_path: Path,
     facade: GmailFacade,
@@ -88,12 +157,18 @@ def run_digest_walkthrough(
     max_results: int,
     input_fn: Callable[[str], str],
     body: bool = False,
+    new_only: bool = False,
 ) -> int:
-    """Interactive review of digest-source candidates for one topic; mutates keep file on [Enter].
+    """Interactive review of digest-source candidates for one topic.
 
-    Returns ``0`` on normal completion, ``1`` if Gmail list fails, ``130`` on interrupt
-    (matching ``unsubscribe check``).  When *body* is True, plain-text bodies are
-    prefetched in parallel and shown as a preview for each non-kept candidate.
+    Per candidate: **Enter** = keep (add to keep list), **u** = unsubscribe,
+    **s** = skip, **q** = quit walkthrough.  At the end, selected unsubscribe
+    items are sent through automated unsubscribe.
+
+    When *new_only* is True, only candidates not already on the keep list are shown.
+    When *body* is True, plain-text bodies are prefetched in parallel and shown as a preview.
+
+    Returns ``0`` on normal completion, ``1`` if Gmail list fails, ``130`` on interrupt.
     """
     query = build_digest_gmail_query(
         window_days=cfg.window_days,
@@ -103,48 +178,90 @@ def run_digest_walkthrough(
         since=since,
     )
     print(
-        f"Digest walkthrough — topic {cfg.name!r} (file {topic_path.name})\n"
-        f"Query: {query}\n"
-        "Only messages classified as digest-source candidates are shown "
-        "(same heuristic as ``digest candidates``).",
+        f"Digest sources — topic {cfg.name!r} ({topic_path.name})",
         flush=True,
     )
     try:
-        messages = facade.list_messages(query, max_results=max_results)
+        all_messages = facade.list_messages(query, max_results=max_results)
     except Exception as e:
         print(f"Could not list messages: {e}", file=sys.stderr, flush=True)
         return 1
 
-    filtered = [
-        m for m in messages if is_digest_source_candidate(headers_from_summary(m))
-    ]
-    if not filtered:
-        print("\nNo digest-source candidates in this query window.", flush=True)
-        return 0
-
-    print(f"\n{len(filtered)} candidate(s).", flush=True)
-    for i, m in enumerate(filtered, start=1):
-        snip = (m.snippet or "").replace("\n", " ").strip()[:100]
-        if snip:
-            print(f"  {i}. {m.from_} : {m.subject!r} :: {snip}", flush=True)
+    # Classify each message
+    candidates: list = []
+    non_candidates: list = []
+    keep_data = load_keep_list(keep_list_path)
+    unsub_data = load_unsubscribed_list()
+    for m in all_messages:
+        h = headers_from_summary(m)
+        if is_digest_source_candidate(h):
+            candidates.append(m)
         else:
-            print(f"  {i}. {m.from_} : {m.subject!r}", flush=True)
+            non_candidates.append(m)
+
+    # Summary
+    n_total = len(all_messages)
+    n_cand = len(candidates)
+    n_new = sum(1 for m in candidates if not is_kept(keep_data, m.from_))
+    num_kept_cand = n_cand - n_new
+    msg_s = "message" if n_total == 1 else "messages"
+    cand_s = "candidate" if n_cand == 1 else "candidates"
+    print(
+        f"  {n_total} {msg_s} total, {n_cand} {cand_s} — "
+        f"{n_new} new, {num_kept_cand} already kept"
+    )
+    if non_candidates:
+        nc_s = "message" if len(non_candidates) == 1 else "messages"
+        print(f"  ({len(non_candidates)} non-candidate {nc_s} omitted)")
     print(flush=True)
 
+    # Split into kept and new
+    kept_candidates = [m for m in candidates if is_kept(keep_data, m.from_)]
+    new_candidates = [m for m in candidates if not is_kept(keep_data, m.from_)]
+
+    # Show kept sources in a compact table (no walkthrough)
+    if kept_candidates and not new_only:
+        print(f"\nAlready kept ({len(kept_candidates)}):")
+        print(_format_sources_table(kept_candidates, keep_data, unsubscribed_data=unsub_data))
+
+    # Decide which to walk through
+    if new_only or not kept_candidates:
+        walk = new_candidates
+    else:
+        walk = new_candidates
+
+    if not walk:
+        if kept_candidates:
+            print(f"\nAll {len(kept_candidates)} sources already kept — nothing new to review.", flush=True)
+        else:
+            print("No candidates to review.", flush=True)
+        return 0
+
+    # Print table of new sources
+    label = "New" if kept_candidates else "To review"
+    src_s = "source" if len(walk) == 1 else "sources"
+    print(f"\n{label} ({len(walk)} {src_s}):")
+    print(_format_sources_table(walk, keep_data, unsubscribed_data=unsub_data))
+    print(flush=True)
+
+    # Prefetch bodies in parallel if requested (new candidates only)
     body_pool: ThreadPoolExecutor | None = None
     body_futures: dict[str, Future[str]] = {}
     if body:
-        keep_pre = load_keep_list(keep_list_path)
-        prefetch = [m for m in filtered if not is_kept(keep_pre, m.from_)]
-        if prefetch:
-            body_pool, body_futures = _start_body_prefetch(facade, prefetch)
+        if walk:
+            body_pool, body_futures = _start_body_prefetch(facade, walk)
+
+    unsub_selected: list = []
+    num_kept = 0
 
     try:
-        for i, m in enumerate(filtered, start=1):
+        for i, m in enumerate(walk, start=1):
+            # Reload keep list each iteration — a previous [Enter] may have
+            # added this sender, making this message now kept.
             keep_data = load_keep_list(keep_list_path)
             if is_kept(keep_data, m.from_):
                 print(
-                    f"\n{'─' * 60}\n  #{i}  (already in keep list — skipping)\n"
+                    f"\n{'─' * 60}\n  #{i}  (now kept — added in a previous step)\n"
                     f"  From: {m.from_}\n  Subject: {m.subject!r}\n",
                     flush=True,
                 )
@@ -162,28 +279,62 @@ def run_digest_walkthrough(
                 else:
                     print("(no preview)", flush=True)
                 print(flush=True)
-            action = _prompt_keep_skip_quit(
-                "  [Enter] add sender to keep list (digest source)  "
-                "[s] skip  [q] quit walkthrough\n  > ",
+            action = _prompt_sources(
+                "  [Enter] keep as source  [u] unsubscribe  [s] skip  [q] quit\n  > ",
                 input_fn=input_fn,
             )
             if action == "":
                 add_to_keep_list(keep_list_path, m.from_, m.subject)
-                print("  (saved to keep list.)", flush=True)
+                num_kept += 1
+                print("  (added to keep list.)", flush=True)
+            elif action == "u":
+                unsub_selected.append(m)
+                print("  (marked for unsubscribe.)", flush=True)
             elif action == "s":
                 print("  (skipped.)", flush=True)
-            else:
+            else:  # q
                 print(
-                    "\n(Stopping walkthrough early; prior [Enter] saves are already on disk.)",
+                    "\n(Stopping walkthrough early; prior selections are already saved.)",
                     flush=True,
                 )
                 break
     except KeyboardInterrupt:
-        print("\nInterrupted. Partial [Enter] saves are already on disk.", flush=True)
+        print("\nInterrupted. Partial selections:", flush=True)
+        _print_selection_summary(len(unsub_selected), num_kept)
         return 130
     finally:
         if body_pool is not None:
             body_pool.shutdown(wait=False, cancel_futures=True)
 
-    print("\nWalkthrough finished.", flush=True)
+    _print_selection_summary(len(unsub_selected), num_kept)
+
+    # Automated unsubscribe for selected items
+    if unsub_selected:
+        while True:
+            raw = input_fn(
+                f"Press Enter to unsubscribe all {len(unsub_selected)} selected "
+                "[q to quit]\n  > "
+            )
+            choice = raw.strip()
+            if choice.lower() == "q":
+                return 0
+            if choice == "":
+                dbg = debugger_address_from_env()
+                selected_items = [(None, m) for m in unsub_selected]
+                report = run_automated_unsubscribe(
+                    facade,
+                    selected_items,
+                    debugger_address=dbg,
+                )
+                print_unsubscribe_report(report)
+                # Record unsubscribed senders for future runs
+                for r in report:
+                    if r.get("status") in ("confirmed", "server-acknowledged"):
+                        add_to_unsubscribed_list(
+                            None, r.get("sender", ""), r.get("subject", "")
+                        )
+                break
+            print("  (Enter or q — try again.)")
+
+    print("\nDone.", flush=True)
     return 0

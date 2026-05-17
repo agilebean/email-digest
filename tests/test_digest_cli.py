@@ -182,6 +182,11 @@ def test_digest_topics_missing_dir(capsys: pytest.CaptureFixture[str], tmp_path:
 def test_digest_run_dry_run_json(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     from email_digest.cli import main
 
+    # Use a temp topic without keywords so the test message ("Sub" / "sn") passes through.
+    td = tmp_path / "topics"
+    td.mkdir()
+    (td / "ai.yaml").write_text(_minimal_topic_yaml(name="ai"), encoding="utf-8")
+
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps(
@@ -222,7 +227,7 @@ def test_digest_run_dry_run_json(capsys: pytest.CaptureFixture[str], tmp_path: P
                     "ai",
                     "--dry-run",
                     "--topics-dir",
-                    str(_TOPICS),
+                    str(td),
                     "--keep-list",
                     str(keep),
                     "--cache-db",
@@ -851,7 +856,7 @@ def test_digest_candidates_no_topic_returns_2(
     from email_digest.cli import main
 
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
-        rc = main(["digest", "candidates"])
+        rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
     assert "topic" in capsys.readouterr().err.lower()
@@ -867,7 +872,7 @@ def test_digest_candidates_invalid_since_skips_gmail(tmp_path: Path) -> None:
         rc = main(
             [
                 "digest",
-                "candidates",
+                "sources",
                 "solo",
                 "--since",
                 "nope",
@@ -879,7 +884,7 @@ def test_digest_candidates_invalid_since_skips_gmail(tmp_path: Path) -> None:
     from_env.assert_not_called()
 
 
-def test_digest_candidates_config_error_skips_gmail(
+def test_digest_sources_config_error_skips_gmail(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from email_digest.cli import main
@@ -888,15 +893,13 @@ def test_digest_candidates_config_error_skips_gmail(
     td.mkdir()
     (td / "solo.yaml").write_text("name: only\n", encoding="utf-8")
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
-        rc = main(["digest", "candidates", "solo", "--topics-dir", str(td)])
+        rc = main(["digest", "sources", "solo", "--topics-dir", str(td)])
     assert rc == 1
     from_env.assert_not_called()
-    data = json.loads(capsys.readouterr().out)
-    assert data["topic"] == "solo"
-    assert "config:" in data["error"]
+    assert "config:" in capsys.readouterr().out or "config:" in capsys.readouterr().err
 
 
-def test_digest_candidates_strict_skips_gmail(
+def test_digest_sources_strict_skips_gmail(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from email_digest.cli import main
@@ -917,144 +920,12 @@ persona_prompt: "p"
     )
     with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
         rc = main(
-            ["digest", "candidates", "solo", "--strict", "--topics-dir", str(td)]
+            ["digest", "sources", "solo", "--strict", "--topics-dir", str(td)]
         )
     assert rc == 1
     from_env.assert_not_called()
-    err = json.loads(capsys.readouterr().out)
-    assert "strict:" in err["error"]
-
-
-def test_digest_candidates_json_lists_rows(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from email_digest.cli import main
-    from unsubscribe.gmail_facade import GmailHeaderSummary
-
-    td = tmp_path / "tcand_ok"
-    td.mkdir()
-    (td / "solo.yaml").write_text(_minimal_topic_yaml(name="solo"), encoding="utf-8")
-    keep = tmp_path / "keep.json"
-    keep.write_text("{}", encoding="utf-8")
-
-    unsub = "<https://vendor.example/unsub>"
-    s = GmailHeaderSummary(
-        id="m1",
-        thread_id="t",
-        from_="News <news@example.com>",
-        subject="Weekly",
-        date="Mon, 1 Jan 2024 00:00:00 +0000",
-        snippet="sn",
-        list_unsubscribe=unsub,
-        list_unsubscribe_post=None,
-        delivered_to=None,
-        rfc_message_id="<weekly@example.com>",
-    )
-    facade = MagicMock()
-    facade.list_messages.return_value = [s]
-
-    with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
-        patch("email_digest.cli.GmailFacade", return_value=facade),
-    ):
-        rc = main(
-            [
-                "digest",
-                "candidates",
-                "solo",
-                "--topics-dir",
-                str(td),
-                "--keep-list",
-                str(keep),
-            ]
-        )
-    assert rc == 0
-    data = json.loads(capsys.readouterr().out)
-    assert data["topic"] == "solo"
-    assert data["file"] == "solo.yaml"
-    assert "query" in data
-    rows = data["rows"]
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["id"] == "m1"
-    assert row["digest_source_candidate"] is True
-    assert row["rfc_message_id"] == "<weekly@example.com>"
-    assert row["sender_key"] == "news@example.com"
-    assert row["keep_list_kept"] is False
-    facade.list_messages.assert_called_once()
-
-
-def test_digest_candidates_keep_list_kept_true_when_sender_in_keep(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from email_digest.cli import main
-    from unsubscribe.gmail_facade import GmailHeaderSummary
-
-    td = tmp_path / "tcand_keep"
-    td.mkdir()
-    (td / "solo.yaml").write_text(_minimal_topic_yaml(name="solo"), encoding="utf-8")
-    keep = tmp_path / "keep2.json"
-    keep.write_text(
-        json.dumps(
-            {
-                "news@example.com": {"subject": "x", "date_kept": "2026-01-01"},
-                "other@y.com": {"subject": "y", "date_kept": "2026-01-02"},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    unsub = "<https://vendor.example/unsub>"
-    in_keep = GmailHeaderSummary(
-        id="a",
-        thread_id="t",
-        from_="News <news@example.com>",
-        subject="A",
-        date="Mon, 1 Jan 2024 00:00:00 +0000",
-        snippet="s",
-        list_unsubscribe=unsub,
-        list_unsubscribe_post=None,
-        delivered_to=None,
-        rfc_message_id="<a@x.com>",
-    )
-    not_in_keep = GmailHeaderSummary(
-        id="b",
-        thread_id="t",
-        from_="Zed <zed@z.com>",
-        subject="B",
-        date="Tue, 2 Jan 2024 00:00:00 +0000",
-        snippet="s",
-        list_unsubscribe=unsub,
-        list_unsubscribe_post=None,
-        delivered_to=None,
-        rfc_message_id="<b@x.com>",
-    )
-    facade = MagicMock()
-    facade.list_messages.return_value = [in_keep, not_in_keep]
-
-    with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
-        patch("email_digest.cli.GmailFacade", return_value=facade),
-    ):
-        rc = main(
-            [
-                "digest",
-                "candidates",
-                "solo",
-                "--topics-dir",
-                str(td),
-                "--keep-list",
-                str(keep),
-            ]
-        )
-    assert rc == 0
-    data = json.loads(capsys.readouterr().out)
-    rows = data["rows"]
-    assert len(rows) == 2
-    assert rows[0]["sender_key"] == "news@example.com"
-    assert rows[0]["keep_list_kept"] is True
-    assert rows[1]["sender_key"] == "zed@z.com"
-    assert rows[1]["keep_list_kept"] is False
+    captured = capsys.readouterr()
+    assert "strict:" in captured.out or "strict:" in captured.err
 
 
 def test_digest_candidates_all_empty_topics_dir_skips_gmail(
@@ -1070,7 +941,7 @@ def test_digest_candidates_all_empty_topics_dir_skips_gmail(
         rc = main(
             [
                 "digest",
-                "candidates",
+                "sources",
                 "--all",
                 "--topics-dir",
                 str(td),
@@ -1079,7 +950,6 @@ def test_digest_candidates_all_empty_topics_dir_skips_gmail(
             ]
         )
     assert rc == 0
-    assert json.loads(capsys.readouterr().out) == []
     from_env.assert_not_called()
 
 
@@ -1101,7 +971,7 @@ def test_digest_candidates_all_only_config_errors_skips_gmail_and_keep_list(
         rc = main(
             [
                 "digest",
-                "candidates",
+                "sources",
                 "--all",
                 "--topics-dir",
                 str(td),
@@ -1112,9 +982,8 @@ def test_digest_candidates_all_only_config_errors_skips_gmail_and_keep_list(
     assert rc == 1
     from_env.assert_not_called()
     lk.assert_not_called()
-    out = json.loads(capsys.readouterr().out)
-    assert len(out) == 2
-    assert all("error" in item for item in out)
+    err = capsys.readouterr().err
+    assert "x" in err or "y" in err
 
 
 def test_digest_candidates_all_invalid_since_skips_gmail(tmp_path: Path) -> None:
@@ -1126,7 +995,7 @@ def test_digest_candidates_all_invalid_since_skips_gmail(tmp_path: Path) -> None
         rc = main(
             [
                 "digest",
-                "candidates",
+                "sources",
                 "--all",
                 "--since",
                 "bad",
@@ -1137,70 +1006,6 @@ def test_digest_candidates_all_invalid_since_skips_gmail(tmp_path: Path) -> None
     assert rc == 2
     from_env.assert_not_called()
 
-
-def test_digest_candidates_all_strict_mixed_ordered_json(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """R2: sorted *.yaml; success envelope + strict error; one OAuth; exit 1."""
-    from email_digest.cli import main
-    from unsubscribe.gmail_facade import GmailHeaderSummary
-
-    td = tmp_path / "cand_all_mix"
-    td.mkdir()
-    (td / "alpha.yaml").write_text(_minimal_topic_yaml(name="alpha"), encoding="utf-8")
-    (td / "z.yaml").write_text(
-        """
-name: wrong_z
-display_name: "Z"
-senders: ["digest@news.com"]
-window_days: 7
-extract_model: fast
-synthesize_model: smart
-persona_prompt: "p"
-""",
-        encoding="utf-8",
-    )
-    keep = tmp_path / "keep_cam.json"
-    keep.write_text("{}", encoding="utf-8")
-    s = GmailHeaderSummary(
-        id="m1",
-        thread_id="t",
-        from_="News <news@example.com>",
-        subject="Weekly",
-        date="Mon, 1 Jan 2024 00:00:00 +0000",
-        snippet="sn",
-        list_unsubscribe="<https://vendor.example/unsub>",
-        list_unsubscribe_post=None,
-        delivered_to=None,
-        rfc_message_id="<weekly@example.com>",
-    )
-    facade = MagicMock()
-    facade.list_messages.return_value = [s]
-    with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
-        patch("email_digest.cli.GmailFacade", return_value=facade),
-    ):
-        rc = main(
-            [
-                "digest",
-                "candidates",
-                "--all",
-                "--strict",
-                "--topics-dir",
-                str(td),
-                "--keep-list",
-                str(keep),
-            ]
-        )
-    assert rc == 1
-    out = json.loads(capsys.readouterr().out)
-    assert len(out) == 2
-    assert out[0]["topic"] == "alpha"
-    assert out[0]["file"] == "alpha.yaml"
-    assert out[0]["rows"][0]["id"] == "m1"
-    assert out[1]["topic"] == "z"
-    assert "strict:" in out[1]["error"]
-    facade.list_messages.assert_called_once()
 
 
 def test_digest_keep_add_remove_roundtrip(tmp_path: Path) -> None:

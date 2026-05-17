@@ -4,8 +4,24 @@
 name: ai
 display_name: "AI Trends — week of {date}"
 senders:
-  - "briefing@machine-learning-weekly.example.com"
-  - "digest@voice-ai-roundup.example.com"
+  - "thebatch@deeplearning.ai"
+  - "newsletter@genai.works"
+  - "newsletter@aisecret.us"
+  - "understandingai@substack.com"
+  - "sebastianraschka@substack.com"
+  - "aicollectivenewsletter@mail.beehiiv.com"
+  - "hello@mail.langchain.com"
+  - "demetrios@news.mlops.community"
+  - "newsletters@email.reuters.com"
+  - "Callum_holt@user.luma-mail.com"
+keywords:
+  - "ai"
+  - "llm"
+  - "gpt"
+  - "transformer"
+  - "agent"
+  - "deep learning"
+  - "machine learning"
 folders:
   - "INBOX"
 window_days: 7

@@ -72,7 +72,7 @@ def test_run_check_query_days_and_chats(tmp_path: Path) -> None:
     def _inp(_p: str = "") -> str:
         return ""
 
-    run_check(7, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(7, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     assert fb.last_query is not None
     assert "newer_than:7d" in fb.last_query
     assert "-in:chats" in fb.last_query
@@ -122,7 +122,7 @@ def test_run_check_filters_kept_and_shows_summary(capsys, tmp_path: Path) -> Non
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     out = capsys.readouterr().out
     assert "Previously kept (will not be asked):" in out
     assert '  1. kept@old.com — "Old" (kept 2024-01-01)' in out
@@ -152,7 +152,7 @@ def test_run_check_zero_new_still_reconsider(capsys, tmp_path: Path) -> None:
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     out = capsys.readouterr().out
     assert "No new newsletters with unsubscribe links found" in out
     assert "Reconsider any previously kept newsletters?" in out
@@ -173,7 +173,7 @@ def test_run_check_q_mid_walkthrough_keeps_incremental_save(tmp_path: Path, caps
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     data = json.loads(k.read_text(encoding="utf-8"))
     assert "a@a.com" in data
     out = capsys.readouterr().out
@@ -232,7 +232,7 @@ def test_run_check_automation_enter_calls_run_automated(
         },
     ]
     with patch("unsubscribe.cli.run_automated_unsubscribe", return_value=sample_rows) as mock_auto:
-        run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=False)
+        run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=False)
     mock_auto.assert_called_once()
     out = capsys.readouterr().out
     assert "── Results ──" in out
@@ -253,7 +253,7 @@ def test_run_check_automation_q_skips(capsys, tmp_path: Path) -> None:
         return next(inputs)
 
     with patch("unsubscribe.cli.run_automated_unsubscribe") as mock_auto:
-        run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=False)
+        run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=False)
     mock_auto.assert_not_called()
 
 
@@ -270,7 +270,7 @@ def test_run_check_reconsider_gate_k_skips_review(tmp_path: Path, capsys) -> Non
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     out = capsys.readouterr().out
     data = json.loads(k.read_text(encoding="utf-8"))
     assert "a@a.com" in data
@@ -290,7 +290,7 @@ def test_run_check_walkthrough_enter_keeps_sender(tmp_path: Path) -> None:
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     data = json.loads(k.read_text(encoding="utf-8"))
     assert "z@z.com" in data
 
@@ -307,7 +307,7 @@ def test_run_check_walkthrough_u_only_does_not_keep(tmp_path: Path) -> None:
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     assert json.loads(k.read_text(encoding="utf-8")) == {}
 
 
@@ -323,5 +323,5 @@ def test_invalid_prompt_repeats(capsys, tmp_path: Path) -> None:
     def _inp(_p: str = "") -> str:
         return next(inputs)
 
-    run_check(3, facade=facade, keep_list_path=k, input_fn=_inp, skip_automation=True)
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     assert "try again" in capsys.readouterr().out

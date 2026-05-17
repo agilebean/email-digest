@@ -1,4 +1,4 @@
 ---
-description: List Gmail candidates for a topic
+description: Review digest sources interactively (keep / unsubscribe)
 ---
-!`mamba run -n email-digest python -m email_digest digest candidates $ARGUMENTS --max-results 10`
+mamba run -n email-digest python -m email_digest digest sources $ARGUMENTS

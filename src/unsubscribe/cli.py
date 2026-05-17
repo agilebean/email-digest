@@ -20,8 +20,11 @@ from unsubscribe.gmail_api_backend import GmailApiBackend
 from unsubscribe.gmail_facade import GmailFacade, GmailHeaderSummary, headers_from_summary
 from unsubscribe.keep_list import (
     add_to_keep_list,
+    add_to_unsubscribed_list,
     is_kept,
+    is_unsubscribed,
     load_keep_list,
+    load_unsubscribed_list,
     remove_from_keep_list,
     save_keep_list,
     sender_key,
@@ -262,6 +265,7 @@ def run_check(
     *,
     facade: GmailFacade,
     keep_list_path: Path = DEFAULT_KEEP_LIST_PATH,
+    unsubscribed_list_path: Path | None = None,
     input_fn: Callable[[str], str] = input,
     skip_automation: bool = False,
 ) -> int:
@@ -270,7 +274,9 @@ def run_check(
     new_unsub_rows: list[tuple[int, str, str]] = []
     reconsidered_selected: list[tuple[str, str]] = []
 
+    unsub_path = unsubscribed_list_path
     keep_data = load_keep_list(keep_list_path)
+    unsub_data = load_unsubscribed_list(unsub_path)
 
     if keep_data:
         print("Previously kept (will not be asked):")
@@ -279,6 +285,15 @@ def run_check(
             subj = meta.get("subject", "")
             dk = meta.get("date_kept", "")
             print(f'  {idx}. {sk} — "{subj}" (kept {dk})')
+        print()
+
+    if unsub_data:
+        print("Previously unsubscribed (will not be asked):")
+        for idx, sk in enumerate(sorted(unsub_data.keys()), start=1):
+            meta = unsub_data[sk]
+            subj = meta.get("subject", "")
+            du = meta.get("date_unsubscribed", "")
+            print(f'  {idx}. {sk} — "{subj}" (unsub\'d {du})')
         print()
 
     try:
@@ -302,6 +317,7 @@ def run_check(
                 has_body_unsubscribe_link=False,
             )
             and not is_kept(keep_data, m.from_)
+            and not is_unsubscribed(unsub_data, m.from_)
         ]
         candidates = _sort_messages(candidates)
         numbered: list[tuple[int, GmailHeaderSummary]] = list(
@@ -470,6 +486,12 @@ def run_check(
                         debugger_address=dbg,
                     )
                     print_unsubscribe_report(report)
+                    # Record unsubscribed senders for future runs
+                    for r in report:
+                        if r.get("status") in ("confirmed", "server-acknowledged"):
+                            add_to_unsubscribed_list(
+                                unsub_path, r.get("sender", ""), r.get("subject", "")
+                            )
                     break
                 print("  (Enter or q — try again.)")
 
