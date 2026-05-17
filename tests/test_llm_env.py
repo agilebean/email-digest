@@ -15,12 +15,16 @@ def test_complete_raises_clear_error_when_deepseek_key_missing(
 ) -> None:
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
-    monkeypatch.setattr("agentkit.llm._litellm._AUTH_PATH", tmp_path / "nonexistent.json")
+    monkeypatch.setattr(
+        "agentkit.llm._litellm._AUTH_PATH", tmp_path / "nonexistent.json"
+    )
     with pytest.raises(Exception, match="No DeepSeek API key"):
         complete([{"role": "user", "content": "hi"}], alias="fast")
 
 
-def test_read_deepseek_from_opencode_auth_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_deepseek_from_opencode_auth_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     auth = tmp_path / "auth.json"
     auth.write_text(
         json.dumps({"deepseek": {"type": "api", "key": "sk-from-opencode-json"}}),
@@ -35,12 +39,13 @@ def test_complete_uses_opencode_when_env_empty(
 ) -> None:
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+
     auth = tmp_path / "auth.json"
     auth.write_text(
-        json.dumps({"opencode": {"key": "sk-opencode-for-complete"}}),
+        json.dumps({"opencode": {"key": "sk-go-sub-key"}}),
         encoding="utf-8",
     )
-    monkeypatch.setattr("email_digest.llm._opencode_auth_json_path", lambda: auth)
+    monkeypatch.setattr("agentkit.llm._litellm._AUTH_PATH", auth)
 
     captured: dict[str, Any] = {}
 
@@ -63,3 +68,4 @@ def test_complete_uses_opencode_when_env_empty(
     out = complete([{"role": "user", "content": "hi"}], alias="fast")
     assert out == "ok"
     assert "model" in captured
+    assert "go/v1" in captured.get("api_base", "")
