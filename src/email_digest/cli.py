@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from agentkit.core import ConfigError
+
 from unsubscribe.gmail_api_backend import GmailApiBackend
 from unsubscribe.gmail_facade import GmailFacade
 from unsubscribe.keep_list import (
@@ -57,7 +59,70 @@ def _digest_run_error_payload(*, topic: str, file: str, error: str) -> dict[str,
 
 
 def _print_digest_run_error(*, topic: str, file: str, error: str) -> None:
-    print(json.dumps(_digest_run_error_payload(topic=topic, file=file, error=error), indent=2))
+    print(f"  ✗ {topic} ({file}): {error}", file=sys.stderr)
+
+
+def _print_digest_run_human(out: dict[str, Any]) -> None:
+    """Print digest results as human-readable text."""
+    topic = out.get("topic", "?")
+    messages = out.get("messages", [])
+    trending = out.get("trending", [])
+    synthesis = out.get("synthesis")
+    html_path = out.get("output_html")
+    emailed = out.get("emailed_to")
+
+    n = len(messages)
+    msg_s = "message" if n == 1 else "messages"
+    print(f"\n━━━ Digest: {topic} — {date.today().isoformat()} ━━━")
+
+    # Summary line
+    parts = [f"{n} {msg_s}"]
+    if trending:
+        parts.append(f"{len(trending)} trending cluster{'s' if len(trending) != 1 else ''}")
+    print(f"  {'  ·  '.join(parts)}")
+    print()
+
+    # Trending
+    if trending:
+        print("  Trending:")
+        for t in trending:
+            label = t.get("label", "?")
+            size = t.get("size", 0)
+            srcs = len(set(t.get("message_ids", [])))
+            print(f"    • {label}  ({size} claims, {srcs} {_s(srcs, 'source')})")
+        print()
+
+    # Messages
+    if messages:
+        for i, m in enumerate(messages, start=1):
+            from_ = m.get("from", "")
+            subject = m.get("subject", "")
+            extraction = m.get("extraction", {}) or {}
+            claims = extraction.get("key_claims", []) or []
+            print(f"  {i}. {from_}")
+            print(f"     {subject!r}")
+            for c in claims[:3]:
+                print(f"     • {c}")
+            if len(claims) > 3:
+                print(f"     … and {len(claims) - 3} more")
+        print()
+
+    # Output
+    if html_path:
+        print(f"  HTML → {html_path}")
+    if emailed:
+        print(f"  Sent to: {emailed}")
+    if synthesis is not None:
+        highlights = synthesis.get("highlights", []) if isinstance(synthesis, dict) else []
+        if highlights:
+            print(f"\n  Highlights ({len(highlights)}):")
+            for h in highlights[:5]:
+                print(f"    • {h}")
+    print()
+
+
+def _s(n: int, word: str) -> str:
+    return f"{n} {word}{'s' if n != 1 else ''}"
 
 
 
@@ -81,7 +146,7 @@ def _digest_topics(ns: argparse.Namespace) -> int:
     for path in sorted(topics_dir.glob("*.yaml")):
         try:
             cfg = load_topic_config(path)
-        except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
+        except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError, ConfigError) as e:
             print(f"Invalid topic config {path}: {e}", file=sys.stderr)
             return 1
         loaded.append((path, cfg))
@@ -139,7 +204,7 @@ def _digest_run(ns: argparse.Namespace) -> int:
         for path in sorted(topics_dir.glob("*.yaml")):
             try:
                 cfg = load_topic_config(path)
-            except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
+            except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError, ConfigError) as e:
                 any_failed = True
                 actions.append(
                     (
@@ -208,13 +273,17 @@ def _digest_run(ns: argparse.Namespace) -> int:
             for item in actions:
                 results.append(item[1])
 
-        print(json.dumps(results, indent=2))
+        for item in results:
+            if "error" in item:
+                print(f"  ✗ {item['topic']} ({item['file']}): {item['error']}", file=sys.stderr)
+            else:
+                _print_digest_run_human(item)
         return 1 if any_failed else 0
 
     topic_path = topics_dir / f"{ns.topic}.yaml"
     try:
         cfg = load_topic_config(topic_path)
-    except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
+    except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError, ConfigError) as e:
         _print_digest_run_error(
             topic=str(ns.topic),
             file=topic_path.name,
@@ -253,7 +322,7 @@ def _digest_run(ns: argparse.Namespace) -> int:
             error=str(e),
         )
         return 1
-    print(json.dumps(out, indent=2))
+    _print_digest_run_human(out)
     return 0
 
 
@@ -286,7 +355,7 @@ def _digest_sources(ns: argparse.Namespace) -> int:
         for path in sorted(topics_dir.glob("*.yaml")):
             try:
                 cfg = load_topic_config(path)
-            except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
+            except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError, ConfigError) as e:
                 any_failed = True
                 actions.append((_ERR, path.stem, path.name, f"config: {e}"))
                 continue
@@ -349,7 +418,7 @@ def _digest_sources(ns: argparse.Namespace) -> int:
     topic_path = topics_dir / f"{ns.topic}.yaml"
     try:
         cfg = load_topic_config(topic_path)
-    except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError) as e:
+    except (OSError, KeyError, ValueError, TypeError, yaml.YAMLError, ConfigError) as e:
         _print_digest_run_error(
             topic=str(ns.topic),
             file=topic_path.name,

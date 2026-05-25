@@ -1,7 +1,6 @@
 """litellm-backed completion — re-exports from agentkit.llm with SQLite logging."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,48 +27,6 @@ MODEL_ALIASES: dict[str, str] = {
     "local": "qwen3",
     "local_smart": "4b",
 }
-
-_OPENCODE_AUTH_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
-
-
-def _opencode_auth_json_path() -> Path:
-    return _OPENCODE_AUTH_PATH
-
-
-def _read_opencode_zen_auth_key() -> str | None:
-    """Return Zen API key from OpenCode auth.json (try opencode, zen, opencode-zen, opencode-go)."""
-    path = _opencode_auth_json_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    for block_name in ("opencode", "zen", "opencode-zen", "opencode-go"):
-        block = data.get(block_name)
-        if isinstance(block, dict):
-            key = block.get("key") or block.get("apiKey")
-            if isinstance(key, str) and key.strip():
-                return key.strip()
-    return None
-
-
-def read_deepseek_key_from_opencode_auth_files() -> str | None:
-    """Return DeepSeek API key from auth.json deepseek block."""
-    path = _opencode_auth_json_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    block = data.get("deepseek")
-    if not isinstance(block, dict):
-        return None
-    key = block.get("key")
-    if isinstance(key, str) and key.strip():
-        return key.strip()
-    return None
 
 
 def resolve_model_alias(alias: str) -> str:

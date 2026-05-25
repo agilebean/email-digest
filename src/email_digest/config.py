@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
+from agentkit.core import load_yaml_mapping
 
 
 @dataclass(frozen=True)
@@ -34,9 +34,7 @@ def _req(data: Mapping[str, Any], key: str) -> Any:
 
 
 def load_topic_config(path: Path) -> TopicConfig:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"topic YAML must be a mapping: {path}")
+    raw = load_yaml_mapping(path)
     trending = raw.get("trending") or {}
     output = raw.get("output") or {}
     keywords_raw = raw.get("keywords", [])

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from email_digest.config import load_topic_config
+from agentkit.core import ConfigError
 
 _TOPICS = Path(__file__).resolve().parent.parent / "topics"
 
@@ -62,5 +63,5 @@ def test_repo_topic_yaml_senders_contain_no_todo_prefix() -> None:
 
 
 def test_load_missing_file_raises() -> None:
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ConfigError):
         load_topic_config(_TOPICS / "nonexistent.yaml")

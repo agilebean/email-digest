@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from email_digest.llm import complete, read_deepseek_key_from_opencode_auth_files
+from email_digest.llm import complete
 
 
 def test_complete_raises_clear_error_when_deepseek_key_missing(
@@ -20,18 +20,6 @@ def test_complete_raises_clear_error_when_deepseek_key_missing(
     )
     with pytest.raises(Exception, match="No DeepSeek API key"):
         complete([{"role": "user", "content": "hi"}], alias="fast")
-
-
-def test_read_deepseek_from_opencode_auth_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    auth = tmp_path / "auth.json"
-    auth.write_text(
-        json.dumps({"deepseek": {"type": "api", "key": "sk-from-opencode-json"}}),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("email_digest.llm._opencode_auth_json_path", lambda: auth)
-    assert read_deepseek_key_from_opencode_auth_files() == "sk-from-opencode-json"
 
 
 def test_complete_uses_opencode_when_env_empty(
