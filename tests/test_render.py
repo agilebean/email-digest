@@ -50,4 +50,6 @@ def test_render_digest_html_smoke() -> None:
     )
     assert "<!DOCTYPE html>" in html
     assert "T1" in html
-    assert "readdle-spark://" in html
+    assert "A <a@list.com>" in html
+    assert "No trending topics" not in html
+    assert "01 Jan 2024" in html  # friendly date format

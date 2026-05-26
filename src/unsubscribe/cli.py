@@ -188,6 +188,27 @@ def _sort_messages(messages: list[GmailHeaderSummary]) -> list[GmailHeaderSummar
     return sorted(messages, key=lambda m: _date_sort_key(m.date), reverse=True)
 
 
+def _dedup_by_sender(
+    messages: list[GmailHeaderSummary],
+) -> list[GmailHeaderSummary]:
+    """Keep only the first (most recent) message per sender address.
+
+    Uses ``sender_key()`` for normalization.  Messages whose sender cannot be
+    normalised (``sender_key`` returns *None*) are always included because they
+    cannot be matched against any other message.
+    """
+    seen: set[str] = set()
+    result: list[GmailHeaderSummary] = []
+    for m in messages:
+        sk = sender_key(m.from_)
+        if sk is None:
+            result.append(m)
+        elif sk not in seen:
+            seen.add(sk)
+            result.append(m)
+    return result
+
+
 def _body_preview_lines(
     text: str,
     *,
@@ -320,6 +341,7 @@ def run_check(
             and not is_unsubscribed(unsub_data, m.from_)
         ]
         candidates = _sort_messages(candidates)
+        candidates = _dedup_by_sender(candidates)
         numbered: list[tuple[int, GmailHeaderSummary]] = list(
             enumerate(candidates, start=1)
         )

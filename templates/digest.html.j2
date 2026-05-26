@@ -29,7 +29,7 @@
 </head>
 <body>
   <h1>{{ display_name }}</h1>
-  <div class="meta">Topic <code>{{ topic }}</code> · Generated {{ generated_at }}</div>
+  <div class="meta">Topic <code>{{ topic }}</code> · {{ generated_at }}</div>
 
   <h2>Trending</h2>
   {% if trending %}
@@ -47,51 +47,41 @@
     </div>
     {% endfor %}
   {% else %}
-    <p class="muted">No multi-source clusters this run.</p>
+    <p class="muted">No trending topics detected.</p>
   {% endif %}
 
   <h2>Highlights</h2>
   {% if highlights %}
     {% for h in highlights %}
     <div class="card">
-      <div><strong>{{ h.subject }}</strong> <span class="muted">· {{ h.from }}</span></div>
+      <div><strong>{{ h.from }}</strong> <span class="muted">· {{ h.subject }}</span></div>
       {% if h.bullets %}
       <ul>
         {% for b in h.bullets %}<li>{{ b }}</li>{% endfor %}
       </ul>
       {% endif %}
-      <div class="muted">
-        {% if h.rfc_message_id %}
-          <a href="{{ spark_deeplink(h.rfc_message_id) }}">Open in Spark</a>
-          {% if h.mailto_href %} · <a href="{{ h.mailto_href }}">mailto</a>{% endif %}
-        {% elif h.mailto_href %}
-          <a href="{{ h.mailto_href }}">mailto</a>
-        {% endif %}
-      </div>
+      {% if h.mailto_href %}
+      <div class="muted"><a href="{{ h.mailto_href }}">mailto</a></div>
+      {% endif %}
     </div>
     {% endfor %}
   {% else %}
-    <p class="muted">No highlights section from synthesis.</p>
+    <p class="muted">Not enough content for highlights this run.</p>
   {% endif %}
 
   <h2>Sources</h2>
   {% for m in messages %}
   <details>
-    <summary>{{ m.subject }} <span class="muted">· {{ m.from }}</span></summary>
-    <p class="muted">{{ m.date }}</p>
+    <summary>{{ m.from }} <span class="muted">· {{ m.subject }}</span></summary>
+    <p class="muted">{{ m.date_friendly }}</p>
     {% if m.extraction and m.extraction.key_claims %}
     <ul>
       {% for c in m.extraction.key_claims %}<li>{{ c }}</li>{% endfor %}
     </ul>
     {% endif %}
-    <p>
-      {% if m.spark_href %}
-        <a href="{{ m.spark_href }}">Open in Spark</a>
-      {% endif %}
-      {% if m.mailto_href %}
-        {% if m.spark_href %} · {% endif %}<a href="{{ m.mailto_href }}">mailto</a>
-      {% endif %}
-    </p>
+    {% if m.mailto_href %}
+    <p><a href="{{ m.mailto_href }}">mailto</a></p>
+    {% endif %}
   </details>
   {% endfor %}
 

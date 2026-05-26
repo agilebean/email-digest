@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,17 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from email_digest.config import TopicConfig
 from email_digest.spark_link import spark_deeplink
+
+
+def _format_date(raw: str) -> str:
+    """Format an RFC2822 date to a friendly short form: 'Sat, 16 May 2026 11:02 EDT'."""
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt is None:
+            return raw
+        return dt.strftime("%a, %d %b %Y %H:%M %Z")
+    except (ValueError, TypeError):
+        return raw
 
 
 def _enrich_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -23,6 +34,7 @@ def _enrich_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row = dict(m)
         row["spark_href"] = spark
         row["mailto_href"] = mailto
+        row["date_friendly"] = _format_date(str(m.get("date") or ""))
         out.append(row)
     return out
 

@@ -325,3 +325,40 @@ def test_invalid_prompt_repeats(capsys, tmp_path: Path) -> None:
 
     run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
     assert "try again" in capsys.readouterr().out
+
+
+def test_dedup_by_sender_keeps_most_recent_only(capsys, tmp_path: Path) -> None:
+    """Multiple messages from the same sender → only the most recent appears."""
+    k = tmp_path / ".unsubscribe_keep.json"
+    # Two emails from the same sender (different display names, same address)
+    messages = [
+        _msg(
+            "older",
+            from_="Newsletter <nl@example.com>",
+            subject="Older issue",
+            date="Wed, 8 Jan 2024 12:00:00 +0000",
+        ),
+        _msg(
+            "newer",
+            from_="NL <nl@example.com>",
+            subject="Newer issue",
+            date="Fri, 10 Jan 2024 12:00:00 +0000",
+        ),
+    ]
+    fb = _FakeBackend(messages)
+    facade = GmailFacade(fb)
+    inputs = iter(["", ""])  # keep the deduped entry, then done with reconsider
+
+    def _inp(_p: str = "") -> str:
+        return next(inputs)
+
+    run_check(3, facade=facade, keep_list_path=k, unsubscribed_list_path=tmp_path / ".unsubscribed.json", input_fn=_inp, skip_automation=True)
+    out = capsys.readouterr().out
+    # Only one entry shown (the most recent "Newer issue")
+    assert "  1. NL <nl@example.com> : Newer issue ::" in out
+    # The older duplicate must NOT appear as a numbered entry
+    assert "Older issue" not in out
+    # Keep-list should have the sender stored once
+    data = json.loads(k.read_text(encoding="utf-8"))
+    assert "nl@example.com" in data
+    assert data["nl@example.com"]["subject"] == "Newer issue"
