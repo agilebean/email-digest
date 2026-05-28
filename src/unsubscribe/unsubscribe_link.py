@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urlparse
@@ -29,6 +30,9 @@ _UNSUBSCRIBE_PHRASES: tuple[str, ...] = (
     "manage preferences",
     "email preferences",
     "update subscription",
+    "declined",
+    "decline",
+    "decline invitation",
 )
 
 # Known ESP / marketing hosts (suffix match). Keep small; expand as real mail proves safe.
@@ -49,6 +53,9 @@ _ALLOWED_BASE_DOMAINS: frozenset[str] = frozenset(
         "google.com",
         "wizzair.com",
         "wizznews.com",
+        "manuscriptcentral.com",
+        "scholarone.com",
+        "editorialmanager.com",
     }
 )
 
@@ -136,6 +143,33 @@ def _href_unsafe_details(href: str) -> str | None:
     return None
 
 
+_DECLINE_CONTEXT_RE = re.compile(
+    r'(?:decline[d]?|decline\s+invitation)[:\s]*'
+    r'<a\s+[^>]*href="(https://[^"]+)"',
+    re.IGNORECASE,
+)
+
+_UNSUB_CONTEXT_RE = re.compile(
+    r'(?:unsubscribe|opt[- ]out|manage\s+preferences)[:\s]*'
+    r'<a\s+[^>]*href="(https://[^"]+)"',
+    re.IGNORECASE,
+)
+
+
+def _extract_link_by_context(html: str, context: str) -> str | None:
+    """Search raw HTML for a *context* word followed by an ``<a>`` on an allowed domain."""
+    pattern = _DECLINE_CONTEXT_RE if context == "decline" else _UNSUB_CONTEXT_RE
+    for m in pattern.finditer(html):
+        href = m.group(1)
+        usafe = _href_unsafe_details(href)
+        if usafe is not None:
+            continue
+        host = urlparse(href).hostname
+        if _host_allowed(host):
+            return href
+    return None
+
+
 def extract_unsubscribe_link(html: str) -> str:
     """
     Return the first HTTPS unsubscribe link whose anchor text / title / aria-label
@@ -160,6 +194,14 @@ def extract_unsubscribe_link(html: str) -> str:
         host = urlparse(href).hostname
         if _host_allowed(host):
             return href
+
+    href = _extract_link_by_context(html, "decline")
+    if href is not None:
+        return href
+
+    href = _extract_link_by_context(html, "unsubscribe")
+    if href is not None:
+        return href
 
     raise NoUnsubscribeLinkError(
         "No allowlisted HTTPS unsubscribe link found in the message body. "

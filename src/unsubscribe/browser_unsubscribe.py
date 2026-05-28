@@ -193,6 +193,12 @@ def _find_unsubscribe_element(driver: WebDriver) -> WebElement:
         '//*[@role="button" and contains(@aria-label, "Unsubscribe")]',
         '//*[contains(text(), "Confirm unsubscribe")]',
         '//*[contains(text(), "Yes, unsubscribe me")]',
+        '//a[contains(text(), "Decline")]',
+        '//button[contains(text(), "Decline")]',
+        '//a[contains(text(), "decline")]',
+        '//button[contains(text(), "decline")]',
+        '//input[@type="submit" and contains(translate(@value, '
+        '"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "decline")]',
     ]
     for xpath in selectors:
         elements = driver.find_elements(By.XPATH, xpath)
@@ -203,6 +209,7 @@ def _find_unsubscribe_element(driver: WebDriver) -> WebElement:
     const needles = [
         'unsubscribe', 'opt out', 'opt-out', 'manage preferences',
         'confirm unsubscribe', 'yes, unsubscribe me',
+        'decline',
     ];
     let els = document.querySelectorAll('a, button, span, div, [role="button"]');
     for (let el of els) {

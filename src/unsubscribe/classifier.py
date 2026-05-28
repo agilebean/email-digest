@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 
+_REVIEWER_DOMAINS: frozenset[str] = frozenset(
+    {"manuscriptcentral.com", "scholarone.com", "editorialmanager.com"}
+)
+
+_REVIEWER_SUBJECT_KW: tuple[str, ...] = (
+    "reviewer invitation",
+    "invitation to review",
+    "review request",
+    "manuscript",
+    "peer review",
+)
+
+_REVIEWER_RESOLVED_SUBJECT_KW: tuple[str, ...] = (
+    "follow-up",
+    "withdrawn",
+    "cancelled",
+    "canceled",
+    "no longer",
+)
+
+
 def _normalize_headers(headers: dict[str, str]) -> dict[str, str]:
     return {name.strip().lower(): value for name, value in headers.items()}
 
@@ -13,6 +34,23 @@ def _has_unsubscribe_path(norm: dict[str, str], *, has_body_unsubscribe_link: bo
     if (norm.get("list-unsubscribe-post") or "").strip():
         return True
     return has_body_unsubscribe_link
+
+
+def _is_reviewer_invitation(norm: dict[str, str]) -> bool:
+    from_ = (norm.get("from") or "").lower()
+    for domain in _REVIEWER_DOMAINS:
+        if domain in from_:
+            break
+    else:
+        return False
+    subject = (norm.get("subject") or "").lower()
+    for kw in _REVIEWER_RESOLVED_SUBJECT_KW:
+        if kw in subject:
+            return False
+    for kw in _REVIEWER_SUBJECT_KW:
+        if kw in subject:
+            return True
+    return False
 
 
 def _transactional(norm: dict[str, str]) -> bool:
@@ -77,6 +115,8 @@ def is_unsubscribable_newsletter(
     unsubscribe (header and/or confirmed body link).
     """
     norm = _normalize_headers(headers)
+    if _is_reviewer_invitation(norm):
+        return True
     if not _has_unsubscribe_path(norm, has_body_unsubscribe_link=has_body_unsubscribe_link):
         return False
     if _transactional(norm):

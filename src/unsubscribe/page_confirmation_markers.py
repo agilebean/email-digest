@@ -28,6 +28,12 @@ CONFIRMATION_TEXT_MARKERS: tuple[str, ...] = (
     "successfully removed from this subscriber list",
     "won't receive any further emails",
     "will not receive any further emails",
+    "you have declined",
+    "you've declined",
+    "declined successfully",
+    "your response has been recorded",
+    "reviewer agreement",
+    "thank you for your response",
 )
 
 # Preference-center multi-step hints (lowercased substring).
