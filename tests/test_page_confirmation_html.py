@@ -23,3 +23,18 @@ def test_html_suggests_unsubscribe_confirmation_positive() -> None:
 def test_html_suggests_unsubscribe_confirmation_negative() -> None:
     html = "<div>Click here to manage preferences.</div>"
     assert html_suggests_unsubscribe_confirmation(html) is False
+
+
+def test_html_confirmation_ignores_instructional_consequence_copy() -> None:
+    """Regression (beehiiv 2026-09-15): "By unsubscribing, you will no longer receive..." is
+    an offer shown *before* the action, not a completed unsubscribe."""
+    html = "<div>By unsubscribing, you will no longer receive this newsletter.</div>"
+    assert html_suggests_unsubscribe_confirmation(html) is False
+
+
+def test_html_confirmation_matches_real_confirmation_next_to_instruction() -> None:
+    html = (
+        "<div>By unsubscribing, you will no longer receive this newsletter.</div>"
+        "<div>You have been unsubscribed.</div>"
+    )
+    assert html_suggests_unsubscribe_confirmation(html) is True

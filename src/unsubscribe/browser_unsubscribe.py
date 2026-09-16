@@ -21,10 +21,9 @@ from unsubscribe.live_brave_trace import (
     save_live_brave_failure_trace,
 )
 from unsubscribe.page_confirmation_markers import (
-    CONFIRMATION_TEXT_MARKERS,
     PREFERENCE_CENTER_SNIPPETS,
+    confirmation_marker_in_text,
     html_suggests_unsubscribe_confirmation,
-    normalize_text_for_confirmation_match,
 )
 from unsubscribe.timed_run import TimedRun
 from unsubscribe.unsubscribe_page_capture import (
@@ -59,8 +58,6 @@ class UnsubscribeElementNotFoundError(RuntimeError):
     """No clickable unsubscribe control matched on the page."""
 
 
-_UNSUBSCRIBED_PAGE_MARKERS: tuple[str, ...] = CONFIRMATION_TEXT_MARKERS
-
 # Needles passed into in-page script (same as preference-center snippets).
 _UNSUBSCRIBE_FROM_ALL_NEEDLES: tuple[str, ...] = PREFERENCE_CENTER_SNIPPETS
 
@@ -78,16 +75,11 @@ def _visible_page_text(driver: WebDriver) -> str:
 
 
 def _page_suggests_unsubscribed_confirmed(driver: WebDriver) -> bool:
-    low = normalize_text_for_confirmation_match(_visible_page_text(driver))
-    return any(m in low for m in _UNSUBSCRIBED_PAGE_MARKERS)
+    return _confirmation_marker_found(_visible_page_text(driver)) is not None
 
 
 def _confirmation_marker_found(text: str) -> str | None:
-    low = normalize_text_for_confirmation_match(text)
-    for m in _UNSUBSCRIBED_PAGE_MARKERS:
-        if m in low:
-            return m
-    return None
+    return confirmation_marker_in_text(text)
 
 
 def _maybe_click_unsubscribe_from_all(driver: WebDriver) -> bool:
@@ -354,9 +346,11 @@ def _try_click_unsubscribe_on_page(
         _r("after_already_confirmed_no_clicks_needed")
         return
 
-    _maybe_click_unsubscribe_from_all(driver)
+    clicked_from_all = _maybe_click_unsubscribe_from_all(driver)
     time.sleep(0.45)
     _r("after_maybe_unsubscribe_from_all_click")
+    if clicked_from_all and _page_suggests_unsubscribed_confirmed(driver):
+        return
 
     filled = (
         bool(subscriber_email)

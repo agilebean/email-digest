@@ -43,6 +43,60 @@ PREFERENCE_CENTER_SNIPPETS: tuple[str, ...] = (
     "unsubscribe me from all",
 )
 
+# Clause boundaries used to scope the instructional lead-in check below.
+_CLAUSE_BOUNDARY_CHARS = ".!?;\n"
+
+# Conditional / instrumental frames describe the consequence of a *future* action
+# ("By unsubscribing, you will no longer receive this newsletter."). Copy inside such a
+# clause is the offer, not a completed unsubscribe, and must not count as confirmation.
+_INSTRUCTIONAL_LEAD_IN_RE = re.compile(
+    r"(?:"
+    r"\b(?:by|if|when|once|after)\s+(?:you\s+|clicking\s+|pressing\s+)?unsubscrib(?:ing|e)\b"
+    r"|\bto\s+unsubscribe\b"
+    r"|\bunsubscribing\s+(?:will|would|means|removes|stops|ends|prevents)\b"
+    r")"
+)
+
+
+def _marker_inside_instructional_clause(normalized_text: str, marker_index: int) -> bool:
+    """True when the clause before ``marker_index`` is framed as a pending action."""
+    clause_start = 0
+    for ch in _CLAUSE_BOUNDARY_CHARS:
+        i = normalized_text.rfind(ch, 0, marker_index)
+        if i + 1 > clause_start:
+            clause_start = i + 1
+    return (
+        _INSTRUCTIONAL_LEAD_IN_RE.search(normalized_text[clause_start:marker_index])
+        is not None
+    )
+
+
+def confirmation_markers_in_text(text: str) -> list[str]:
+    """All :data:`CONFIRMATION_TEXT_MARKERS` present **outside** instructional clauses.
+
+    A marker inside "By unsubscribing, you will no longer receive this newsletter." is
+    skipped; the same phrase standing alone ("You will no longer receive ...") is a match.
+    """
+    low = normalize_text_for_confirmation_match(text)
+    found: list[str] = []
+    for m in CONFIRMATION_TEXT_MARKERS:
+        start = 0
+        while True:
+            i = low.find(m, start)
+            if i < 0:
+                break
+            if not _marker_inside_instructional_clause(low, i):
+                found.append(m)
+                break
+            start = i + len(m)
+    return found
+
+
+def confirmation_marker_in_text(text: str) -> str | None:
+    """First confirming marker in ``text`` (see :func:`confirmation_markers_in_text`)."""
+    found = confirmation_markers_in_text(text)
+    return found[0] if found else None
+
 
 def rough_text_from_html_for_confirmation(html: str, *, max_chars: int = 80_000) -> str:
     """Strip tags/scripts so confirmation phrases in saved HTML match like live ``innerText``."""
@@ -58,7 +112,11 @@ def rough_text_from_html_for_confirmation(html: str, *, max_chars: int = 80_000)
 
 
 def html_suggests_unsubscribe_confirmation(html: str) -> bool:
-    """True if saved HTML (body text approximation) contains :data:`CONFIRMATION_TEXT_MARKERS`."""
+    """True if saved HTML (body text approximation) contains confirming marker copy.
 
-    low = normalize_text_for_confirmation_match(rough_text_from_html_for_confirmation(html))
-    return any(m in low for m in CONFIRMATION_TEXT_MARKERS)
+    Uses the same instructional-clause filter as the live browser check, so a page that
+    merely explains "By unsubscribing, you will no longer receive ..." is not a confirmation.
+    """
+
+    rough = rough_text_from_html_for_confirmation(html)
+    return confirmation_marker_in_text(rough) is not None

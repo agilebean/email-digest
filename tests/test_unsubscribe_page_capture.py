@@ -97,6 +97,24 @@ def test_categorize_preference_center() -> None:
     assert any(t.startswith("preference_center_text:") for t in tags)
 
 
+def test_categorize_instructional_copy_is_preference_center_not_confirmation() -> None:
+    """Regression: beehiiv copy "By unsubscribing, you will no longer receive..." is an offer."""
+    text = (
+        "Conscious Founders General information Billing Preferences Logout Preferences "
+        "No specific preferences available at this time. Account actions "
+        "By unsubscribing, you will no longer receive this newsletter. "
+        "Unsubscribe from all communications I did not sign up for this"
+    )
+    primary, tags = categorize_unsubscribe_page(
+        page_url="https://consciousfounders.beehiiv.com/subscribe/x/preferences",
+        page_title="Preferences",
+        text_preview=text,
+        html_excerpt="",
+    )
+    assert primary == UnsubscribePageCategory.PREFERENCE_CENTER
+    assert not any(t.startswith("confirmation_text:") for t in tags)
+
+
 def test_categorize_captcha_before_login() -> None:
     primary, _ = categorize_unsubscribe_page(
         page_url="https://x/",

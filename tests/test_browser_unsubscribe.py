@@ -187,6 +187,29 @@ def test_confirmation_detects_linkedin_style_copy_typographic_apostrophe() -> No
         assert _page_suggests_unsubscribed_confirmed(MagicMock()) is True
 
 
+# Captured live 2026-09-15 (session_20260915T075455Z_59de8a32da): the page explains what
+# unsubscribing *would* do and still offers the button that performs it.
+_BEEHIIV_PREFERENCES_COPY = (
+    "Conscious Founders\n"
+    "General information\nBilling\nPreferences\nLogout\n\n"
+    "Preferences\n\n"
+    "No specific preferences available at this time.\n\n"
+    "Account actions\n\n"
+    "By unsubscribing, you will no longer receive this newsletter.\n\n"
+    "Unsubscribe from all communications\n"
+    "I did not sign up for this"
+)
+
+
+def test_confirmation_ignores_instructional_copy_on_preference_center() -> None:
+    """Regression: "By unsubscribing, you will no longer receive..." describes the pending action."""
+    with patch(
+        "unsubscribe.browser_unsubscribe._visible_page_text",
+        return_value=_BEEHIIV_PREFERENCES_COPY,
+    ):
+        assert _page_suggests_unsubscribed_confirmed(MagicMock()) is False
+
+
 def test_try_click_skips_interaction_when_landing_already_confirmed() -> None:
     """One-click URLs can land on a final confirmation page with no unsubscribe control."""
     with patch("unsubscribe.browser_unsubscribe.time.sleep"):
@@ -211,6 +234,58 @@ def test_try_click_skips_interaction_when_landing_already_confirmed() -> None:
     m_conf.assert_called_once()
     m_all.assert_not_called()
     m_fill.assert_not_called()
+    m_click.assert_not_called()
+
+
+def test_try_click_clicks_preference_center_on_instructional_copy() -> None:
+    """Regression: the beehiiv landing page must be clicked, not treated as already confirmed."""
+    with (
+        patch("unsubscribe.browser_unsubscribe.time.sleep"),
+        patch("unsubscribe.browser_unsubscribe.WebDriverWait"),
+        patch(
+            "unsubscribe.browser_unsubscribe._visible_page_text",
+            return_value=_BEEHIIV_PREFERENCES_COPY,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe._maybe_click_unsubscribe_from_all",
+            return_value=True,
+        ) as m_all,
+        patch(
+            "unsubscribe.browser_unsubscribe._maybe_fill_visible_email_field",
+            return_value=False,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe._click_unsubscribe_once_main_or_iframes",
+        ) as m_click,
+        patch(
+            "unsubscribe.browser_unsubscribe._maybe_click_form_submit_button",
+            return_value=False,
+        ),
+    ):
+        _try_click_unsubscribe_on_page(MagicMock(), settle_s=0.01, subscriber_email=None)
+    m_all.assert_called_once()
+    m_click.assert_called()
+
+
+def test_try_click_stops_after_pre_click_when_page_confirms() -> None:
+    """If clicking "unsubscribe from all" itself completes the action, no further click is needed."""
+    with (
+        patch("unsubscribe.browser_unsubscribe.time.sleep"),
+        patch("unsubscribe.browser_unsubscribe.WebDriverWait"),
+        patch(
+            "unsubscribe.browser_unsubscribe._maybe_click_unsubscribe_from_all",
+            return_value=True,
+        ) as m_all,
+        patch(
+            "unsubscribe.browser_unsubscribe._click_unsubscribe_once_main_or_iframes",
+        ) as m_click,
+        patch(
+            "unsubscribe.browser_unsubscribe._page_suggests_unsubscribed_confirmed",
+            side_effect=[False, True],
+        ),
+    ):
+        _try_click_unsubscribe_on_page(MagicMock(), settle_s=0.01)
+    m_all.assert_called_once()
     m_click.assert_not_called()
 
 

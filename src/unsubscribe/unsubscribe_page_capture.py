@@ -37,8 +37,8 @@ from typing import Any
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from unsubscribe.page_confirmation_markers import (
-    CONFIRMATION_TEXT_MARKERS,
     PREFERENCE_CENTER_SNIPPETS,
+    confirmation_markers_in_text,
     normalize_text_for_confirmation_match,
     rough_text_from_html_for_confirmation,
 )
@@ -292,9 +292,8 @@ def categorize_unsubscribe_page(
     ):
         tag("error_like")
 
-    for m in CONFIRMATION_TEXT_MARKERS:
-        if m in norm_combo:
-            tag(f"confirmation_text:{m[:48]}")
+    for m in confirmation_markers_in_text(norm_combo):
+        tag(f"confirmation_text:{m[:48]}")
 
     for m in PREFERENCE_CENTER_SNIPPETS:
         if m in norm_combo:
