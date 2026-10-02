@@ -14,8 +14,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: SoHu-Labs/agentkit
-          ref: v0.2.0
+          repository: agilebean/agentkit
+          ref: v0.3.1
           path: vendor/agentkit
           token: ${{ secrets.GITHUB_TOKEN }}
 
