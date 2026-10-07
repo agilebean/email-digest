@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from unsubscribe.browser_unsubscribe import (
     UnsubscribeElementNotFoundError,
@@ -148,6 +148,92 @@ def test_empty_jobs_no_attach() -> None:
         out = batch_browser_unsubscribe([], debugger_address="127.0.0.1:9222", quiet=True)
     mock_attach.assert_not_called()
     assert out == []
+
+
+def test_batch_does_not_switch_to_a_preexisting_window() -> None:
+    """Regression: the driver must not grab ``handles[-1]`` when no new window opened.
+
+    Attaching to the user's real Brave means extra tabs (the run that failed landed on a
+    Claude tab, whose HTML is captured in ``001_job1_after_navigate.html``). The old code
+    switched to ``handles[-1]`` and then died with "no such window: target window already
+    closed" when that foreign tab went away.
+    """
+    mock_driver = MagicMock()
+    # Same two windows before and after the navigation: our tab plus a user's tab.
+    type(mock_driver).window_handles = PropertyMock(
+        side_effect=[["ours", "users-claude"], ["ours", "users-claude"]]
+    )
+    jobs = [_job(2, "https://app.loops.so/unsubscribe/abc")]
+
+    with (
+        patch("unsubscribe.browser_unsubscribe.ensure_brave_running"),
+        patch(
+            "unsubscribe.browser_unsubscribe.chrome_driver_attach",
+            return_value=mock_driver,
+        ),
+        patch("unsubscribe.browser_unsubscribe._try_click_unsubscribe_on_page"),
+        patch(
+            "unsubscribe.browser_unsubscribe._page_suggests_unsubscribed_confirmed",
+            return_value=True,
+        ),
+    ):
+        batch_browser_unsubscribe(jobs, debugger_address="127.0.0.1:9222", quiet=True)
+
+    mock_driver.get.assert_called_once_with(jobs[0][3])
+    mock_driver.switch_to.window.assert_not_called()
+
+
+def test_batch_opens_a_fresh_tab_per_job_and_never_reuses_current() -> None:
+    """Attaching to the user's Brave must not navigate their current tab.
+
+    Every job opens its own tab, so the tab we drive is never one of theirs.
+    """
+    mock_driver = MagicMock()
+    mock_driver.window_handles = ["user-tab-1", "user-tab-2"]
+    jobs = [_job(1, "https://one.example/u"), _job(2, "https://two.example/u")]
+
+    with (
+        patch("unsubscribe.browser_unsubscribe.ensure_brave_running"),
+        patch(
+            "unsubscribe.browser_unsubscribe.chrome_driver_attach",
+            return_value=mock_driver,
+        ),
+        patch("unsubscribe.browser_unsubscribe._try_click_unsubscribe_on_page"),
+        patch(
+            "unsubscribe.browser_unsubscribe._page_suggests_unsubscribed_confirmed",
+            return_value=True,
+        ),
+    ):
+        batch_browser_unsubscribe(jobs, debugger_address="127.0.0.1:9222", quiet=True)
+
+    assert mock_driver.switch_to.new_window.call_count == 2
+    mock_driver.switch_to.new_window.assert_called_with("tab")
+    assert [c.args[0] for c in mock_driver.get.call_args_list] == [j[3] for j in jobs]
+
+
+def test_batch_follows_a_window_the_navigation_opened() -> None:
+    """A popup opened by the navigation is still followed (the original intent)."""
+    mock_driver = MagicMock()
+    type(mock_driver).window_handles = PropertyMock(
+        side_effect=[["ours"], ["ours", "popup"]]
+    )
+    jobs = [_job(2, "https://lists.example/popup-unsub")]
+
+    with (
+        patch("unsubscribe.browser_unsubscribe.ensure_brave_running"),
+        patch(
+            "unsubscribe.browser_unsubscribe.chrome_driver_attach",
+            return_value=mock_driver,
+        ),
+        patch("unsubscribe.browser_unsubscribe._try_click_unsubscribe_on_page"),
+        patch(
+            "unsubscribe.browser_unsubscribe._page_suggests_unsubscribed_confirmed",
+            return_value=True,
+        ),
+    ):
+        batch_browser_unsubscribe(jobs, debugger_address="127.0.0.1:9222", quiet=True)
+
+    mock_driver.switch_to.window.assert_called_once_with("popup")
 
 
 def test_unsubscribe_flow_cases_are_distinct_documented_strings() -> None:

@@ -251,6 +251,18 @@ def _page_ready(driver: WebDriver) -> bool:
         return False
 
 
+def _safe_window_handles(driver: WebDriver) -> list[str]:
+    """Current window handles in browser order, or ``[]`` when the browser cannot answer.
+
+    Reading handles is how the batch decides which window it is driving, so it must
+    never raise out of the loop (a dying window makes the read throw).
+    """
+    try:
+        return list(driver.window_handles)
+    except Exception:
+        return []
+
+
 def _click_unsubscribe_once_main_or_iframes(driver: WebDriver) -> None:
     """One attempt: primary Unsubscribe control in main document or first matching iframe."""
     try:
@@ -532,17 +544,26 @@ def batch_browser_unsubscribe(
                 progress.step(
                     f"Opening unsubscribe URL {idx}/{len(jobs)} in a new browser tab — {host} ..."
                 )
-                if idx == 1:
-                    driver.get(url)
-                else:
-                    driver.switch_to.new_window("tab")
-                    driver.get(url)
-                try:
-                    handles = driver.window_handles
-                    if len(handles) > 1:
-                        driver.switch_to.window(handles[-1])
-                except Exception:
-                    pass
+                # Always open our own tab: attaching to the user's real Brave means the
+                # "current" window is one of *their* tabs, so navigating it would clobber
+                # what they had open. Every job gets a fresh tab that only we drive.
+                driver.switch_to.new_window("tab")
+                handles_before = set(_safe_window_handles(driver))
+                driver.get(url)
+
+                # Follow a window this navigation *opened* (some unsubscribe links pop one
+                # up), but never switch to a window that already existed. That is one of the
+                # user's own tabs; grabbing ``handles[-1]`` blindly used to land the driver on
+                # such a tab, which then closed under it — "no such window: target window
+                # already closed" mid-run.
+                opened = [
+                    h for h in _safe_window_handles(driver) if h not in handles_before
+                ]
+                if opened:
+                    try:
+                        driver.switch_to.window(opened[-1])
+                    except Exception:
+                        pass
 
                 if capture_session is not None:
                     capture_session.record_snapshot(
