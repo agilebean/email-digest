@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  email-digest chromedriver prewarm LaunchAgent.
+
+  Downloads the chromedriver matching the installed Brave once a day, so a Brave
+  update is absorbed before the next unsubscribe run needs the driver. Reads the
+  Brave version from the binary, so Brave need not be running.
+
+  Install:
+    cp scripts/com.email-digest.chromedriver-prewarm.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.email-digest.chromedriver-prewarm.plist
+
+  Uninstall:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.email-digest.chromedriver-prewarm.plist
+    rm ~/Library/LaunchAgents/com.email-digest.chromedriver-prewarm.plist
+
+  Check:   launchctl list | grep chromedriver
+  Logs:    tail -f ~/Library/Logs/email-digest-chromedriver-prewarm.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.email-digest.chromedriver-prewarm</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chaehan/Software/miniforge3/envs/email-digest/bin/python</string>
+        <string>-m</string>
+        <string>agentkit.browser.prewarm</string>
+    </array>
+
+    <!-- daily at 10:00; launchd runs a missed interval when the Mac wakes -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chaehan/Library/Logs/email-digest-chromedriver-prewarm.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/chaehan/Library/Logs/email-digest-chromedriver-prewarm.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

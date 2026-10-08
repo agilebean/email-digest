@@ -11,6 +11,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+from unsubscribe.browser_helpers import prefetch_chromedriver
 from unsubscribe.classifier import is_unsubscribable_newsletter
 from unsubscribe.execution import (
     debugger_address_from_env,
@@ -304,6 +305,22 @@ def _print_selection_summary(
     print(f"  {total} total")
 
 
+def _start_driver_prefetch(debugger_address: str | None) -> None:
+    """Warm the chromedriver matching the browser, in the background.
+
+    A browser upgrade leaves the cached driver stale, and the first run after it
+    would otherwise pay for the download at attach time. Starting it here, before the
+    Gmail scan, hides it behind work the run does anyway. Best effort: a failure here
+    is not fatal, because ``chrome_driver_attach`` re-resolves the driver itself.
+    """
+    if not debugger_address:
+        return
+    try:
+        prefetch_chromedriver(debugger_address=debugger_address)
+    except Exception:
+        pass
+
+
 def run_check(
     days: int,
     *,
@@ -341,6 +358,7 @@ def run_check(
         print()
 
     try:
+        _start_driver_prefetch(debugger_address_from_env())
         print("Fetching inbox from Gmail…", flush=True)
         messages = facade.list_messages(query, max_results=_MAX_SCAN_MESSAGES)
     except KeyboardInterrupt:

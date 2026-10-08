@@ -21,12 +21,17 @@ Available topics: `ai`, `health` (defined in `topics/*.yaml` with sender lists, 
 
 ### Invariant: the chromedriver must match Brave's Chromium major version
 
-The unsubscribe flow attaches to Brave via `--remote-debugging-port=9222`. The chromedriver that drives the session must share Brave's embedded Chromium major version (155 against 155). `chrome_driver_attach` enforces this: it reads the running browser's major from the CDP endpoint, then
+The unsubscribe flow attaches to Brave via `--remote-debugging-port=9222`. The chromedriver that drives the session must share Brave's embedded Chromium major version (155 against 155). `chrome_driver_attach` enforces this: it detects the browser major (CDP first, then the installed binary), then
 
-1. resolves a matching driver from the Selenium cache in offline mode (about two seconds, no network), and
-2. when nothing matches is cached (the first run after a Brave update), downloads the matching driver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) into `~/.cache/selenium/`, bounded at 180 seconds.
+1. reuses a matching driver already in `~/.cache/selenium/chromedriver/`, otherwise
+2. downloads the matching driver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/), bounded at 600 seconds (`AGENTKIT_DRIVER_DOWNLOAD_TIMEOUT_S` overrides it) and serialized across runs by a cache lock.
 
-The chromedriver in PATH is ignored (`--skip-driver-in-path`), so it does not need to be kept in sync. The brew-managed driver lags Brave and is not used.
+The chromedriver in PATH is ignored, so it does not need to be kept in sync. The brew-managed driver lags Brave and is not used.
+
+**The fix runs in the background.** A Brave update is absorbed in two places, so an interactive run rarely waits:
+
+- **In-run prefetch**: `run_check` starts `prefetch_chromedriver` before the Gmail scan, so the download overlaps work the run does anyway.
+- **Daily prewarm**: the `com.email-digest.chromedriver-prewarm` LaunchAgent runs `python -m agentkit.browser.prewarm` at 10:00 daily, reading the installed Brave version so the cache is warm before the next run. Install and uninstall commands are in the header of `scripts/com.email-digest.chromedriver-prewarm.plist`.
 
 **Check the running version:**
 ```bash
@@ -34,8 +39,9 @@ The chromedriver in PATH is ignored (`--skip-driver-in-path`), so it does not ne
 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" --version
 ```
 
-**When Brave auto-updates** and the Chromium major bumps: the first unsubscribe run downloads the matching chromedriver once and caches it; later runs reuse it. There is no manual step. If the download is blocked, the run fails with a clear message instead of hanging. To clear it, connect to the network and retry, or drop a matching binary at `~/.cache/selenium/chromedriver/<platform>/<version>/chromedriver`.
+If a download is blocked, the run fails with a clear message instead of hanging. To clear it, connect to the network and retry, or drop a matching binary at `~/.cache/selenium/chromedriver/<platform>/<version>/chromedriver`.
 
 **Where the coupling lives:**
-- `agentkit/src/agentkit/browser/_browser.py` — `chrome_driver_attach` reads the running browser major from CDP, resolves offline from the cache, then downloads from Chrome for Testing when no match is cached
+- `agentkit/src/agentkit/browser/_driver.py` — detection, cache lookup, the locked download, and `prefetch_chromedriver`
+- `agentkit/src/agentkit/browser/_browser.py` — `chrome_driver_attach` attaches with the resolved driver
 - `~/.cache/selenium/chromedriver/` — where the matching driver is cached between runs

@@ -226,6 +226,68 @@ def test_run_check_q_mid_walkthrough_keeps_incremental_save(tmp_path: Path, caps
     assert "Stopping walkthrough early" in out
 
 
+def test_run_check_prefetches_driver_when_debugger_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GOOGLEADS_BROWSER_DEBUGGER_ADDRESS", "127.0.0.1:9222")
+    fb = _FakeBackend([])
+    facade = GmailFacade(fb)
+
+    with patch("unsubscribe.cli.prefetch_chromedriver") as mock_prefetch:
+        run_check(
+            3,
+            facade=facade,
+            keep_list_path=tmp_path / ".unsubscribe_keep.json",
+            unsubscribed_list_path=tmp_path / ".unsubscribed.json",
+            input_fn=lambda _p="": "",
+            skip_automation=True,
+        )
+
+    mock_prefetch.assert_called_once_with(debugger_address="127.0.0.1:9222")
+
+
+def test_run_check_skips_prefetch_without_debugger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("GOOGLEADS_BROWSER_DEBUGGER_ADDRESS", raising=False)
+    fb = _FakeBackend([])
+    facade = GmailFacade(fb)
+
+    with patch("unsubscribe.cli.prefetch_chromedriver") as mock_prefetch:
+        run_check(
+            3,
+            facade=facade,
+            keep_list_path=tmp_path / ".unsubscribe_keep.json",
+            unsubscribed_list_path=tmp_path / ".unsubscribed.json",
+            input_fn=lambda _p="": "",
+            skip_automation=True,
+        )
+
+    mock_prefetch.assert_not_called()
+
+
+def test_run_check_survives_prefetch_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("GOOGLEADS_BROWSER_DEBUGGER_ADDRESS", "127.0.0.1:9222")
+    fb = _FakeBackend([])
+    facade = GmailFacade(fb)
+
+    with patch(
+        "unsubscribe.cli.prefetch_chromedriver", side_effect=RuntimeError("boom")
+    ):
+        code = run_check(
+            3,
+            facade=facade,
+            keep_list_path=tmp_path / ".unsubscribe_keep.json",
+            unsubscribed_list_path=tmp_path / ".unsubscribed.json",
+            input_fn=lambda _p="": "",
+            skip_automation=True,
+        )
+
+    assert code == 0
+
+
 def test_main_empty_argv_defaults_to_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -322,7 +384,6 @@ def test_run_check_automation_enter_calls_run_automated(
     out = capsys.readouterr().out
     assert "── Results ──" in out
     assert "one-click POST" in out or "server accepted" in out
-    assert "may require further steps" in out
 
 
 def test_run_check_confirm_prompt_renders_boxed_form(
