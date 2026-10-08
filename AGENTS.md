@@ -19,25 +19,23 @@ Available topics: `ai`, `health` (defined in `topics/*.yaml` with sender lists, 
 
 ## Browser environment
 
-### Invariant: chromedriver version must match Brave's Chromium version, not system Chrome
+### Invariant: the chromedriver must match Brave's Chromium major version
 
-The unsubscribe flow attaches to Brave via `--remote-debugging-port=9222`. Chromedriver in PATH must match **Brave's embedded Chromium major version**, not whatever `Google Chrome for Testing` Selenium auto-caches.
+The unsubscribe flow attaches to Brave via `--remote-debugging-port=9222`. The chromedriver that drives the session must share Brave's embedded Chromium major version (155 against 155). `chrome_driver_attach` enforces this: it reads the running browser's major from the CDP endpoint, then
 
-**Check both versions:**
+1. resolves a matching driver from the Selenium cache in offline mode (about two seconds, no network), and
+2. when nothing matches is cached (the first run after a Brave update), downloads the matching driver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) into `~/.cache/selenium/`, bounded at 180 seconds.
+
+The chromedriver in PATH is ignored (`--skip-driver-in-path`), so it does not need to be kept in sync. The brew-managed driver lags Brave and is not used.
+
+**Check the running version:**
 ```bash
-# Brave's Chromium version (the "148" in "148.1.90.124")
+# Brave's Chromium version; the leading "155" is the major the driver must share
 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" --version
-# chromedriver version (must share the same major)
-chromedriver --version
 ```
 
-**When Brave auto-updates** and the Chromium major bumps:
-1. Brew installs the new Brave cask; chromedriver does NOT auto-update with it
-2. Download the matching chromedriver from [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) and replace `/opt/homebrew/bin/chromedriver`
-3. Clear the Selenium Chrome cache: `rm -rf ~/.cache/selenium/chrome/mac-arm64/`
-4. `xattr -d com.apple.quarantine /opt/homebrew/bin/chromedriver`
-5. Start Brave with `--remote-debugging-port=9222` before running unsubscribe
+**When Brave auto-updates** and the Chromium major bumps: the first unsubscribe run downloads the matching chromedriver once and caches it; later runs reuse it. There is no manual step. If the download is blocked, the run fails with a clear message instead of hanging. To clear it, connect to the network and retry, or drop a matching binary at `~/.cache/selenium/chromedriver/<platform>/<version>/chromedriver`.
 
 **Where the coupling lives:**
-- `agentkit/src/agentkit/browser/_browser.py` — `build_chrome_options_for_remote_debugging` sets `binary_location` to Brave's path so Selenium Manager checks compatibility against Brave, not auto-detected Chrome for Testing
-- `/opt/homebrew/bin/chromedriver` — the driver binary itself (brew cask is deprecated; use manual download)
+- `agentkit/src/agentkit/browser/_browser.py` — `chrome_driver_attach` reads the running browser major from CDP, resolves offline from the cache, then downloads from Chrome for Testing when no match is cached
+- `~/.cache/selenium/chromedriver/` — where the matching driver is cached between runs
