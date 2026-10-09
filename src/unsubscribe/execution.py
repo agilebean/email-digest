@@ -89,7 +89,6 @@ def print_unsubscribe_report(results: list[dict[str, Any]]) -> None:
         if method == "one-click" and status == "server-acknowledged":
             code = _one_click_http_code(detail)
             print(f"       one-click POST → server accepted ({code})")
-            print("       ⚠  may require further steps (check your inbox)")
         elif method == "browser" and status == "confirmed":
             print(f"       {detail}")
         elif method == "browser" and status == "clicked-no-confirmation":

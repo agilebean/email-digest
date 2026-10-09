@@ -309,7 +309,6 @@ def test_print_unsubscribe_report_outputs_truthful_footer(capsys) -> None:
     )
     text = capsys.readouterr().out
     assert "── Results ──" in text
-    assert "may require further steps" in text
     assert "server accepted (200)" in text
     assert "attempted:" in text
     assert "confirmed" in text
