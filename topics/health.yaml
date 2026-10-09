@@ -17,8 +17,8 @@ keywords:
 folders:
   - "INBOX"
 window_days: 30
-extract_model: cheap
-synthesize_model: cheap
+extract_model: fast
+synthesize_model: fast
 persona_prompt: |
   You are summarizing for Chaehan, a Ph.D. in psychology (Yonsei University)
   with 2 years of lecturing and 6.5 years as professor in design psychology.

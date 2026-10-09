@@ -28,7 +28,7 @@ This section is the **continuity contract** for any implementer (human or LLM): 
 | **R4++** | **`digest walkthrough --all`** — multi-topic walkthrough in sorted YAML filename order; two-phase scan + deferred Gmail (same pattern as `run --all` / `candidates --all`); config/strict errors printed to stderr, walkthrough continues to next topic; exit **1** if any topic failed, **130** on interrupt |
 | **R4+++** | **Walkthrough shortlist** — numbered one-line summaries (`From : Subject :: snippet`) printed before the per-message loop, giving an overview of all candidates at a glance  |
 | **R6** | **`topics/*.yaml`** — removed **`TODO-`** sender placeholders; RFC2606 **`example.com`** newsletter-shaped addresses + multi-sender examples; CI guard: no **`todo-`** in any topic **`senders`** list |
-| **R7** | **`cheap` alias for MiniMax via OpenCode Go** — env-var-configurable model (`CHEAP_MODEL`, default `openai/minimax-m2.5`), base URL (`CHEAP_API_BASE`, default `https://opencode.ai/zen/go/v1`), API key (`CHEAP_API_KEY` or auto-read from OpenCode `opencode-go` block in `~/.local/share/opencode/auth.json`); injects `api_base`/`api_key` for litellm OpenAI-compatible endpoint; `resolve_model_alias` returns the active model string |
+| **R7** | ~~**`cheap` alias for MiniMax via OpenCode Go**~~ — **removed 2026-10-09**: MiniMax M2.5 is no longer served by the Go endpoint, and M2.7/M3 require the `/messages` protocol; `topics/health.yaml` now uses `fast` |
 | **E** | `digest candidates` adds `sender_key`, `keep_list_kept`, `--keep-list` (parity with `digest run` gate) |
 | **F** | Each `run_digest` / dry-run **`messages[]`** item includes **`digest_source_candidate`** (same classifier as slice B / `digest candidates`) |
 | **G** (R3b) | When `digest_source_candidate` is false: **no** `get_message_html`, **no** `llm_complete`, **no** `put_extraction_json`; empty `key_claims` / `entities` / `numbers`. Cached extractions still honored. |
@@ -120,9 +120,8 @@ MODEL_ALIASES = {
     # No env vars — paths are hardcoded from ~/.lmstudio/models/.
     "local":       "2b",   # Qwen3.5-2B-MLX-4bit
     "local_smart": "4b",   # Qwen3.5-4B-MLX-4bit
-    "cheap": "openai/minimax-m2.5",   # OpenCode Go endpoint
 }
-# local/local_smart bypass litellm entirely; fast/smart use DeepSeek API; cheap uses OpenCode Go.
+# local/local_smart bypass litellm entirely; fast/smart use DeepSeek API.
 # Lazy-loaded MLX singleton per variant (see local-chat/src/llm.py for the MlxLlm pattern).
 
 def complete(
@@ -496,7 +495,9 @@ Implementation order for digest follow-ups (**smallest scope first**): **Slice C
 |----|------|------|----------|
 | R4+++ | ~~Snippet-based one-line summary in shortlist (before per-message walkthrough)~~ → **Shipped** | UX | no |
 
-### Slice: R7 — `cheap` alias for MiniMax via OpenCode Go
+### Slice: R7 (REMOVED 2026-10-09) — `cheap` alias for MiniMax via OpenCode Go
+
+> **Status: removed 2026-10-09.** Retained as history only — the `cheap` alias and its routing no longer exist (MiniMax M2.5 withdrawn from Go; M2.7/M3 use the `/messages` protocol). `topics/health.yaml` now uses `fast`.
 
 - **Goal:** Operators can use MiniMax models through OpenCode Go's OpenAI-compatible endpoint (`https://opencode.ai/zen/go/v1`) for low-cost extraction included in the Go subscription ($10/mo), via a **`cheap`** alias in topic YAML (`extract_model: cheap`), without embedding a second provider SDK — reuses litellm's existing `openai/` model prefix with custom `api_base` and `api_key`.
 - **Non-goals:** Changing default DeepSeek aliases; adding live API calls in CI; bundling a second SDK; full MiniMax model catalog in the codebase.
@@ -531,7 +532,7 @@ Implementation order for digest follow-ups (**smallest scope first**): **Slice C
 
 ## RESOLVED QUESTIONS
 
-1. ~~Minimax/cheap~~ → **Shipped (R7):** `cheap` alias for MiniMax via OpenCode Go (`openai/minimax-m2.5` default, `https://opencode.ai/zen/go/v1` endpoint, env-var-configurable).
+1. ~~Minimax/cheap~~ → **Shipped (R7), then removed 2026-10-09:** MiniMax M2.5 is gone from the Go endpoint and M2.7/M3 need the `/messages` protocol, so the `cheap` alias was dropped and `topics/health.yaml` switched to `fast`.
 2. ~~Gmail OAuth token~~ → Same as billing-glugglejug, `GOOGLE_OAUTH_TOKEN` env var
 3. ~~Gmail API porting~~ → Already in this repo (src/unsubscribe/)
 4. ~~Sender allowlists~~ → Use unsubscribe-style candidate selection workflow

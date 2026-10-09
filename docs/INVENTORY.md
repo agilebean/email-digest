@@ -25,7 +25,7 @@ Entry points: `python -m email_digest` (`__main__` → `cli.main`), console scri
 | `pipeline.py` | Orchestrates query → list → keep-list filter → extract (LLM) or empty extraction when not **`digest_source_candidate`** → cache → trending → optional synthesis + HTML + `maybe_email_digest`; each **`messages[]`** item includes **`digest_source_candidate`** |
 | `gmail_query.py` | Builds Gmail `q` strings from topic YAML (`window_days`, senders, folders, `since`) |
 | `config.py` | `TopicConfig` + `load_topic_config` from `topics/<stem>.yaml` |
-| `llm.py` | `complete` (litellm for `fast`/`smart`/`cheap`; direct `mlx_lm` for `local`/`local_smart`), aliases, `resolve_model_alias`, `MLX_MODEL_VARIANTS` (mirrors `local-chat`), LLM call logging into SQLite |
+| `llm.py` | `complete` (litellm for `fast`/`smart`; direct `mlx_lm` for `local`/`local_smart`), aliases, `resolve_model_alias`, `MLX_MODEL_VARIANTS` (mirrors `local-chat`), LLM call logging into SQLite |
 | `cache.py` | SQLite: `extractions`, `embeddings`, `llm_calls`; `cost_report_payload` / rollups for `digest cost --json` |
 | `embed.py` | sentence-transformers embeddings keyed by claim hash |
 | `cluster.py` | HDBSCAN-based trending groups |

@@ -94,7 +94,6 @@ MODEL_ALIASES = {
     # local / local_smart: direct MLX (not litellm); mirrors local-chat MODEL_VARIANTS paths
     "local":        "2b",   # Qwen3.5-2B-MLX-4bit
     "local_smart":  "4b",   # Qwen3.5-4B-MLX-4bit
-    # "cheap" / Minimax — shipped via OpenCode Go endpoint (openai/minimax-m2.5, https://opencode.ai/zen/go/v1)
 }
 MLX_MODEL_VARIANTS = {
     "qwen3": "~/.lmstudio/models/lmstudio-community/Qwen3-4B-Instruct-2507-MLX-4bit",
@@ -104,11 +103,11 @@ MLX_MODEL_VARIANTS = {
 }
 ```
 
-`fast` and `smart` use litellm → DeepSeek API. `cheap` uses litellm → OpenCode Go proxy (MiniMax M2.5). `local` / `local_smart` bypass litellm entirely and load the Qwen model directly via `mlx_lm` (same lazy-load singleton pattern as `local-chat/src/llm.py`). No env vars needed for local models — paths are hardcoded in the module.
+`fast` and `smart` use litellm → DeepSeek API. `local` / `local_smart` bypass litellm entirely and load the Qwen model directly via `mlx_lm` (same lazy-load singleton pattern as `local-chat/src/llm.py`). No env vars needed for local models — paths are hardcoded in the module.
 
 Implementation options, in order of preference:
 
-1. `litellm` — handles DeepSeek, Cheaps with one signature. Used for `fast` / `smart` / `cheap`.
+1. `litellm` — handles DeepSeek with one signature. Used for `fast` / `smart`.
 2. Direct `mlx_lm` — used for `local` / `local_smart` (avoids the LM Studio HTTP server entirely).
 
 Single function signature:

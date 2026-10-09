@@ -1,10 +1,10 @@
 # Homework — post-implementation manual steps
 
-## 1. Verify cheap/MiniMax via OpenCode Go
+## 1. Verify health topic extraction via OpenCode Go
 ```bash
 mamba run -n email-digest python -m email_digest digest run health --dry-run
 ```
-Check extraction quality. Model: `openai/minimax-m2.5`, endpoint: `https://opencode.ai/zen/go/v1`, key auto-read from `~/.local/share/opencode/auth.json` (`opencode-go` block).
+Check extraction quality. Model: `deepseek-v4-flash` (alias `fast`), endpoint: `https://opencode.ai/zen/go/v1`, key auto-read from `~/.local/share/opencode/auth.json` (`opencode-go` block). The former `cheap`/MiniMax alias was removed — MiniMax M2.5 is gone from the Go endpoint, and M2.7/M3 require the `/messages` protocol.
 
 ## 2. Tune topic keywords
 Edit `topics/health.yaml` and `topics/ai.yaml`. Current keywords are examples — replace with terms that match your real inbox.
