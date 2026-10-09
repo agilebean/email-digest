@@ -61,10 +61,15 @@ def complete(
     messages: list[dict[str, Any]],
     alias: str = "smart",
     *,
-    max_tokens: int = 2000,
+    max_tokens: int = 4000,
     temperature: float = 0.3,
     json_mode: bool = False,
 ) -> str:
+    # Disable reasoning/thinking for extraction tasks (DeepSeek v4 models)
+    # to ensure content goes into content, not reasoning_content.
+    extra: dict[str, Any] = {}
+    if json_mode or alias in ("fast", "smart"):
+        extra["thinking"] = {"type": "disabled"}
     return _agentkit_complete(
         messages,
         alias=alias,
@@ -73,4 +78,5 @@ def complete(
         json_mode=json_mode,
         aliases=MODEL_ALIASES,
         log_fn=_log_to_sqlite,
+        **extra,
     )

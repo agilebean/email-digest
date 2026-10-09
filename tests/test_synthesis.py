@@ -20,15 +20,14 @@ def test_synthesize_digest_parses_json() -> None:
         "messages": [
             {
                 "id": "m1",
-                "rfc_message_id": "<x@y.com>",
                 "from": "A",
                 "subject": "S",
                 "date": "d",
-                "extraction": {"key_claims": []},
+                "extraction": {"key_claims": ["claim 1"], "urls": ["https://x.com/1"]},
             }
         ],
     }
-    fake = json.dumps({"trending": [], "highlights": []})
+    fake = json.dumps({"briefing": [{"headline": "H", "category": "X", "bullets": ["b"], "urls": []}]})
     with patch("email_digest.synthesis.llm_complete", return_value=fake):
         out = synthesize_digest(cfg, bundle)
-    assert out == {"trending": [], "highlights": []}
+    assert out == {"briefing": [{"headline": "H", "category": "X", "bullets": ["b"], "urls": []}]}

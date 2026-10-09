@@ -1,10 +1,11 @@
-"""Digest orchestration: collect, extract, trending, synthesis, HTML (M4)."""
+"""Digest orchestration: collect, extract, trending, synthesis, email (M4)."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 from datetime import UTC, date, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,40 @@ from email_digest.paths import default_cache_db_path, repo_root
 
 _EXTRACTION_SYSTEM = (
     "You extract structured information from a single email. "
-    "Reply with one JSON object only, no markdown fences."
+    "Reply with one JSON object only, no markdown fences. "
+    "Output valid json."
 )
-_MAX_BODY_CHARS = 12_000
+_MAX_BODY_CHARS = 4_000
+_MAX_URLS = 50
+
+
+class _HrefExtractor(HTMLParser):
+    """Extract unique href values from <a> tags (excludes mailto:)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: list[str] = []
+        self._seen: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        for name, value in attrs:
+            if name.lower() == "href" and value:
+                v = value.strip()
+                if v and not v.startswith("mailto:") and v not in self._seen:
+                    self._seen.add(v)
+                    self.urls.append(v)
+
+
+def _extract_urls(html: str, max_urls: int = _MAX_URLS) -> list[str]:
+    """Extract unique href URLs from HTML <a> tags."""
+    parser = _HrefExtractor()
+    try:
+        parser.feed(html)
+    except Exception:
+        pass
+    return parser.urls[:max_urls]
 
 
 def _keyword_matches(keywords: tuple[str, ...], subject: str, snippet: str) -> bool:
@@ -53,16 +85,26 @@ def _append_per_message_failure_log(
         f.write(line)
 
 
-def _extraction_user_message(subject: str, body: str) -> str:
-    return (
+def _extraction_user_message(subject: str, body: str, urls: list[str] | None = None) -> str:
+    msg = (
         "Email subject:\n"
         f"{subject}\n\n"
         "Email body (plain text, may be truncated):\n"
         f"{body}\n\n"
-        "Extract structured data. Output JSON with keys "
-        "key_claims (array of 5-10 short strings), entities (array of strings), "
-        "numbers (array of strings or numbers). Use empty arrays when nothing applies."
     )
+    if urls:
+        msg += "URLs found in this email (for reference):\n"
+        for u in urls:
+            msg += f"  {u}\n"
+        msg += "\n"
+    msg += (
+        "Extract structured data. Output valid json with keys "
+        "key_claims (array of 3-6 short strings), entities (array of strings), "
+        "numbers (array of strings or numbers), "
+        "urls (array of strings — copy the most relevant URLs from above, ordered by relevance). "
+        "Use empty arrays when nothing applies."
+    )
+    return msg
 
 
 def _compute_trending(
@@ -130,12 +172,28 @@ def run_digest(
     query = build_digest_gmail_query(
         window_days=cfg.window_days,
         senders=list(cfg.senders),
-        keywords=list(cfg.keywords),
+        keywords=list(cfg.keywords) if cfg.keywords else None,
         folders=list(cfg.folders),
         since=since,
     )
     rows = facade.list_messages(query, max_results=max_results)
     keep = load_keep_list(keep_list_path)
+    exact_senders: set[str] = set()
+    wildcard_domains: set[str] = set()
+    for s in cfg.senders:
+        s_low = s.lower().strip()
+        if s_low.startswith("*@"):
+            wildcard_domains.add(s_low[2:])
+        else:
+            exact_senders.add(s_low)
+
+    def _sender_is_listed(sk: str) -> bool:
+        if sk in exact_senders:
+            return True
+        if wildcard_domains:
+            domain = sk.split("@", 1)[-1]
+            return domain in wildcard_domains
+        return False
 
     db_path = cache_db or default_cache_db_path()
     conn = connect(db_path)
@@ -149,15 +207,40 @@ def run_digest(
         html_map: dict[str, str] = {}
         for m in rows:
             sk = sender_key(m.from_)
-            if sk is None or sk not in keep:
+            if sk is None:
                 continue
-            if not _keyword_matches(cfg.keywords, m.subject, m.snippet):
-                continue
+            has_keyword = _keyword_matches(cfg.keywords, m.subject, m.snippet)
             h = headers_from_summary(m)
             digest_candidate = is_digest_source_candidate(h)
-            cached = get_extraction_json(conn, cfg.name, m.id)
-            if cached is not None or not digest_candidate:
-                kept_rows.append((m, digest_candidate, cached))
+
+            # Tier 1: topic-listed sender → must be kept + pass keyword filter
+            if _sender_is_listed(sk):
+                if sk not in keep:
+                    continue
+                if not has_keyword:
+                    continue
+            # Tier 2: keyword discovery from unknown sender → skip keep-list
+            # and keyword post-filter (Gmail query already matched the keyword
+            # against full email body). Only require digest-source-candidate.
+            else:
+                if not digest_candidate:
+                    continue
+            cached_raw = get_extraction_json(conn, cfg.name, m.id)
+            # Invalidate cache entries missing the "urls" field (schema upgrade)
+            cached: dict | None = None
+            if cached_raw is not None:
+                try:
+                    cached = json.loads(cached_raw)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(cached, dict) and "urls" not in cached:
+                        cached = None  # re-extract to get URLs
+            if cached is not None:
+                kept_rows.append((m, digest_candidate, cached_raw))
+                continue
+            if not digest_candidate:
+                kept_rows.append((m, digest_candidate, None))
                 continue
             kept_rows.append((m, digest_candidate, None))
             html_map[m.id] = ""  # placeholder; fetch in bulk below
@@ -193,8 +276,9 @@ def run_digest(
                         raise GmailTransportError(
                             f"No HTML body fetched for {m.id}"
                         )
+                    email_urls = _extract_urls(html)
                     plain = strip_html_to_text(html)[:_MAX_BODY_CHARS]
-                    user = _extraction_user_message(m.subject, plain)
+                    user = _extraction_user_message(m.subject, plain, urls=email_urls)
                     raw = llm_complete(
                         [
                             {"role": "system", "content": _EXTRACTION_SYSTEM},
@@ -241,27 +325,27 @@ def run_digest(
     if dry_run:
         return base
 
-    from email_digest.render import render_digest_html
     from email_digest.synthesis import synthesize_digest
+    from email_digest.email_briefing import render_briefing_html
 
     synth = synthesize_digest(cfg, base)
-    td = template_dir or (repo_root() / "templates")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    html = render_digest_html(
-        cfg=cfg,
-        synthesis=synth,
-        messages=out_messages,
-        template_dir=td,
+    briefing_items = synth.get("briefing") if isinstance(synth, dict) else []
+    if not isinstance(briefing_items, list):
+        briefing_items = []
+
+    email_html = render_briefing_html(
+        topic=cfg.name,
+        display_name=cfg.display_name,
+        briefing=briefing_items,
+        date_iso=run_day_iso,
     )
-    path = output_dir / f"{cfg.name}_{run_day_iso}.html"
-    path.write_text(html, encoding="utf-8")
     emailed_to: str | None = None
     if cfg.also_email_to:
-        emailed_to = maybe_email_digest(cfg, html, date_iso=run_day_iso, facade=facade)
+        emailed_to = maybe_email_digest(cfg, email_html, date_iso=run_day_iso, facade=facade)
     return {
         **base,
         "synthesis": synth,
-        "output_html": str(path),
+        "briefing_items": len(briefing_items),
         "emailed_to": emailed_to,
     }
 

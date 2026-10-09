@@ -98,7 +98,7 @@ def test_dry_run_filters_by_keep_list(tmp_path: Path) -> None:
     ]
     facade.get_message_html.return_value = "<html><body>Hi</body></html>"
 
-    fake_extract = '{"key_claims":["c1"],"entities":[],"numbers":[]}'
+    fake_extract = '{"key_claims":["c1"],"entities": [], "numbers": [], "urls": []}'
 
     with patch("email_digest.pipeline.llm_complete", return_value=fake_extract):
         out = run_digest_dry_run(
@@ -148,7 +148,7 @@ def test_digest_messages_carry_digest_source_candidate(
         _summary("2", "Digest <digest@news.com>", "Personal note"),
     ]
     facade.get_message_html.return_value = "<html><body>x</body></html>"
-    fake_extract = '{"key_claims":["c"],"entities":[],"numbers":[]}'
+    fake_extract = '{"key_claims":["c"],"entities": [], "numbers": [], "urls": []}'
 
     with patch("email_digest.pipeline.llm_complete", return_value=fake_extract) as llm_m:
         out = run_digest_dry_run(
@@ -189,7 +189,7 @@ def test_digest_skips_llm_when_non_candidate_but_cache_wins(
         conn,
         "ai",
         "1",
-        {"key_claims": ["from-cache"], "entities": [], "numbers": []},
+        {"key_claims": ["from-cache"], "entities": [], "numbers": [], "urls": []},
     )
     conn.close()
 
@@ -223,7 +223,7 @@ def test_extraction_cache_skips_html_and_llm(tmp_path: Path) -> None:
 
     conn = connect(db)
     put_extraction_json(
-        conn, "ai", "1", {"key_claims": ["cached"], "entities": [], "numbers": []}
+        conn, "ai", "1", {"key_claims": ["cached"], "entities": [], "numbers": [], "urls": []}
     )
     conn.close()
 
@@ -339,7 +339,7 @@ def test_per_message_failure_logged_and_run_continues(tmp_path: Path) -> None:
         return "<html><body>ok</body></html>"
 
     facade.get_message_html.side_effect = _html
-    fake_extract = '{"key_claims":["c1"],"entities":[],"numbers":[]}'
+    fake_extract = '{"key_claims":["c1"],"entities": [], "numbers": [], "urls": []}'
 
     with patch("email_digest.pipeline.llm_complete", return_value=fake_extract):
         out = run_digest_dry_run(
@@ -362,19 +362,17 @@ def test_per_message_failure_logged_and_run_continues(tmp_path: Path) -> None:
     assert "GmailTransportError" in log_text
 
 
-def test_full_digest_writes_html(tmp_path: Path) -> None:
+def test_full_digest_emails_briefing(tmp_path: Path) -> None:
     cfg = _minimal_topic_cfg(tmp_path)
     keep = tmp_path / "keep.json"
     keep.write_text(
         json.dumps({"digest@news.com": {"subject": "Hi", "date_kept": "2026-01-01"}}),
         encoding="utf-8",
     )
-    repo = _TOPICS.parent
-    templates = repo / "templates"
     fake_extract = json.dumps(
-        {"key_claims": ["a", "b"], "entities": [], "numbers": []}
+        {"key_claims": ["a", "b"], "entities": [], "numbers": [], "urls": []}
     )
-    fake_synth = json.dumps({"trending": [], "highlights": []})
+    fake_synth = json.dumps({"briefing": [{"headline": "Test", "category": "Company News", "bullets": ["bullet"], "urls": []}]})
 
     facade = MagicMock()
     facade.get_message_html_bulk.side_effect = GmailTransportError(
@@ -411,11 +409,7 @@ def test_full_digest_writes_html(tmp_path: Path) -> None:
             cache_db=tmp_path / "full.sqlite",
             dry_run=False,
             output_dir=tmp_path / "html_out",
-            template_dir=templates,
         )
-    assert "output_html" in out
-    p = Path(out["output_html"])
-    assert p.is_file()
-    assert "<!DOCTYPE html>" in p.read_text(encoding="utf-8")[:500]
-    facade.send_html_email.assert_called_once()
+    assert out.get("briefing_items") == 1
     assert out.get("emailed_to") == "digest@news.com"
+    facade.send_html_email.assert_called_once()

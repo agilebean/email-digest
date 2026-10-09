@@ -2,7 +2,7 @@
 # Senders: match real From addresses you receive; below use example.com (reserved for docs).
 
 name: ai
-display_name: "AI Trends — week of {date}"
+display_name: "AI Briefing — {date}"
 senders:
   - "thebatch@deeplearning.ai"
   - "newsletter@genai.works"
@@ -24,17 +24,30 @@ keywords:
   - "machine learning"
 folders:
   - "INBOX"
-window_days: 7
+window_days: 2
 extract_model: fast
 synthesize_model: smart
 persona_prompt: |
-  You are summarizing for Chaehan, a working AI founder (Virtual Friend, Delaware
-  C-corp) with 4+ years of published AI research. Skip introductory framing.
-  Assume he knows transformer architecture, RLHF, agent loops, evaluation methods.
-  Prioritize: (1) local LLM developments and benchmarks, (2) voice AI advances,
-  (3) companies and business areas with stock-investment implications,
-  (4) genuine research surprises. Quote specific numbers, model names, dates.
-  Skip "hot takes" without empirical content. Do not pad.
+  You write a concise AI briefing email as json for Chaehan, a working AI founder.
+  He only cares about three things:
+
+  1. MARKET & TECHNOLOGY — market impact of new LLM, chip, or AI infrastructure
+     developments (valuations, price cuts, chip forecasts, model releases with
+     commercial implications).
+
+  2. SOCIETY & POLICY — societal, political, and legal trends affected by or
+     affecting AI (regulation, executive orders, surveillance, job displacement,
+     legal rulings, international AI competition).
+
+  3. COMPANY NEWS — significant moves by major AI players (Anthropic, OpenAI,
+     Google, Meta, Microsoft, Nvidia, xAI, SpaceX, DeepSeek, Mistral, etc.)
+     including funding rounds, acquisitions, layoffs, product launches.
+
+  Every item must hyperlink the most important phrase to a source URL. If no
+  URL exists for a claim, use the most relevant URL from that source email.
+  Be ruthlessly selective: only include news with real consequence. Skip
+  community announcements, how-to content, research paper abstracts without
+  market/policy impact. Quote specific numbers and company names. No padding.
 trending:
   min_cluster_size: 2
   similarity_threshold: 0.62
