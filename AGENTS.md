@@ -42,6 +42,7 @@ The chromedriver in PATH is ignored, so it does not need to be kept in sync. The
 If a download is blocked, the run fails with a clear message instead of hanging. To clear it, connect to the network and retry, or drop a matching binary at `~/.cache/selenium/chromedriver/<platform>/<version>/chromedriver`.
 
 **Where the coupling lives:**
+- `src/unsubscribe/agentkit_compat.py` — the single seam for agentkit imports; optional APIs degrade to a no-op when an older agentkit lacks them
 - `agentkit/src/agentkit/browser/_driver.py` — detection, cache lookup, the locked download, and `prefetch_chromedriver`
 - `agentkit/src/agentkit/browser/_browser.py` — `chrome_driver_attach` attaches with the resolved driver
 - `~/.cache/selenium/chromedriver/` — where the matching driver is cached between runs
