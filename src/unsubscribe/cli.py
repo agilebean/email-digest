@@ -19,6 +19,7 @@ from unsubscribe.execution import (
     run_automated_unsubscribe,
 )
 from unsubscribe.gmail_api_backend import GmailApiBackend
+from unsubscribe.gmail_backend import open_gmail_backend
 from unsubscribe.gmail_facade import GmailFacade, GmailHeaderSummary, headers_from_summary
 from unsubscribe.keep_list import (
     add_to_keep_list,
@@ -629,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Token written to {args.token_path}")
             return 0
         args = _check_parser().parse_args(argv)
-        backend = GmailApiBackend.from_env()
+        backend = open_gmail_backend()
         facade = GmailFacade(backend)
         return run_check(args.days, facade=facade)
     except KeyboardInterrupt:

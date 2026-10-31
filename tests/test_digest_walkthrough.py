@@ -198,7 +198,7 @@ def test_digest_walkthrough_cli_no_topic_returns_2(
 ) -> None:
     from email_digest.cli import main
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
@@ -368,7 +368,7 @@ def test_walkthrough_cli_all_no_topic_or_all_arg(
 ) -> None:
     from email_digest.cli import main
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
@@ -382,7 +382,7 @@ def test_walkthrough_cli_all_empty_dir(
 
     td = tmp_path / "topics"
     td.mkdir()
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "sources", "--all", "--topics-dir", str(td)])
     assert rc == 0
     from_env.assert_not_called()
@@ -400,7 +400,7 @@ def test_walkthrough_cli_all_config_errors(
     keep = tmp_path / "k.json"
     keep.write_text("{}", encoding="utf-8")
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main([
             "digest", "sources", "--all",
             "--topics-dir", str(td),
@@ -426,7 +426,7 @@ def test_walkthrough_cli_all_mixed_success_and_failure(
     keep = tmp_path / "k.json"
     keep.write_text("{}", encoding="utf-8")
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as fake_be, \
+    with patch("email_digest.cli.open_gmail_backend") as fake_be, \
          patch("builtins.input", return_value="s"):
         backend = MagicMock()
         backend.list_messages.return_value = [_newsletter_summary()]
@@ -455,7 +455,7 @@ def test_walkthrough_cli_all_both_topics_good(
     keep = tmp_path / "k.json"
     keep.write_text("{}", encoding="utf-8")
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as fake_be, \
+    with patch("email_digest.cli.open_gmail_backend") as fake_be, \
          patch("builtins.input", return_value="s"):
         backend = MagicMock()
         backend.list_messages.return_value = [_newsletter_summary()]
@@ -481,7 +481,7 @@ def test_walkthrough_cli_all_invalid_since(
     keep = tmp_path / "k.json"
     keep.write_text("{}", encoding="utf-8")
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main([
             "digest", "sources", "--all",
             "--topics-dir", str(td),

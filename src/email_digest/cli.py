@@ -14,7 +14,7 @@ import yaml
 
 from agentkit.core import ConfigError
 
-from unsubscribe.gmail_api_backend import GmailApiBackend
+from unsubscribe.gmail_backend import open_gmail_backend
 from unsubscribe.gmail_facade import GmailFacade
 from unsubscribe.keep_list import (
     add_to_keep_list,
@@ -175,7 +175,7 @@ def _digest_run(ns: argparse.Namespace) -> int:
         need_gmail = any(tag is _RUN for tag, *_ in actions)
         results: list[dict[str, Any]] = []
         if need_gmail:
-            backend = GmailApiBackend.from_env()
+            backend = open_gmail_backend()
             facade = GmailFacade(backend)
             for item in actions:
                 tag = item[0]
@@ -234,7 +234,7 @@ def _digest_run(ns: argparse.Namespace) -> int:
         )
         return 1
 
-    backend = GmailApiBackend.from_env()
+    backend = open_gmail_backend()
     facade = GmailFacade(backend)
     try:
         out = run_digest(
@@ -308,7 +308,7 @@ def _digest_sources(ns: argparse.Namespace) -> int:
 
         need_gmail = any(tag is _RUN for tag, *_ in actions)
         if need_gmail:
-            backend = GmailApiBackend.from_env()
+            backend = open_gmail_backend()
             facade = GmailFacade(backend)
             for item in actions:
                 tag = item[0]
@@ -369,7 +369,7 @@ def _digest_sources(ns: argparse.Namespace) -> int:
         )
         return 1
 
-    backend = GmailApiBackend.from_env()
+    backend = open_gmail_backend()
     facade = GmailFacade(backend)
     return run_digest_sources(
         cfg,

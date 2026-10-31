@@ -299,8 +299,8 @@ def test_main_empty_argv_defaults_to_check(
 
     monkeypatch.setattr("unsubscribe.cli.run_check", _fake_run_check)
     monkeypatch.setattr(
-        "unsubscribe.cli.GmailApiBackend",
-        MagicMock(from_env=MagicMock(return_value=MagicMock())),
+        "unsubscribe.cli.open_gmail_backend",
+        MagicMock(return_value=MagicMock()),
     )
     monkeypatch.setattr("unsubscribe.cli.GmailFacade", MagicMock())
 
@@ -319,8 +319,8 @@ def test_main_flag_first_runs_check_workflow(
 
     monkeypatch.setattr("unsubscribe.cli.run_check", _fake_run_check)
     monkeypatch.setattr(
-        "unsubscribe.cli.GmailApiBackend",
-        MagicMock(from_env=MagicMock(return_value=MagicMock())),
+        "unsubscribe.cli.open_gmail_backend",
+        MagicMock(return_value=MagicMock()),
     )
     monkeypatch.setattr("unsubscribe.cli.GmailFacade", MagicMock())
 
@@ -331,8 +331,8 @@ def test_main_flag_first_runs_check_workflow(
 def test_main_check_is_not_a_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("unsubscribe.cli.run_check", MagicMock(return_value=0))
     monkeypatch.setattr(
-        "unsubscribe.cli.GmailApiBackend",
-        MagicMock(from_env=MagicMock(return_value=MagicMock())),
+        "unsubscribe.cli.open_gmail_backend",
+        MagicMock(return_value=MagicMock()),
     )
     monkeypatch.setattr("unsubscribe.cli.GmailFacade", MagicMock())
 

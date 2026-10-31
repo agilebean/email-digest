@@ -215,7 +215,7 @@ def test_digest_run_dry_run_json(capsys: pytest.CaptureFixture[str], tmp_path: P
 
     fake = '{"key_claims":["x"],"entities":[],"numbers":[]}'
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", MagicMock(return_value=facade)),
         patch("email_digest.pipeline.llm_complete", return_value=fake),
     ):
@@ -272,7 +272,7 @@ def test_digest_run_all_returns_0_when_all_succeed(
     )
 
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -318,7 +318,7 @@ def test_digest_run_all_returns_1_when_run_digest_raises(
     )
 
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -364,7 +364,7 @@ def test_digest_run_all_records_config_load_errors(
     )
 
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -420,7 +420,7 @@ def test_digest_run_missing_topic_yaml_returns_1_json(
     keep = tmp_path / "keep.json"
     keep.write_text("{}", encoding="utf-8")
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
     ):
         from_env.return_value = MagicMock()
@@ -454,7 +454,7 @@ def test_digest_run_invalid_since_returns_2(
     keep = tmp_path / "keep.json"
     keep.write_text("{}", encoding="utf-8")
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
     ):
         rc = main(
@@ -491,7 +491,7 @@ def test_digest_run_single_topic_pipeline_error_returns_1(
         encoding="utf-8",
     )
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest", side_effect=RuntimeError("boom")),
     ):
@@ -525,7 +525,7 @@ def test_digest_run_all_empty_topics_dir_returns_0(
     keep = tmp_path / "keep.json"
     keep.write_text("{}", encoding="utf-8")
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
     ):
         rc = main(
@@ -560,7 +560,7 @@ def test_digest_run_all_only_config_errors_skips_gmail(
     keep = tmp_path / "keep.json"
     keep.write_text("{}", encoding="utf-8")
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -623,7 +623,7 @@ persona_prompt: "p"
         encoding="utf-8",
     )
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -653,7 +653,7 @@ persona_prompt: "p"
 def test_digest_run_no_topic_skips_gmail_init() -> None:
     from email_digest.cli import main
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "run", "--dry-run"])
     assert rc == 2
     from_env.assert_not_called()
@@ -664,7 +664,7 @@ def test_digest_run_all_invalid_since_skips_gmail_init(tmp_path: Path) -> None:
 
     td = tmp_path / "tinv"
     td.mkdir()
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(
             [
                 "digest",
@@ -770,7 +770,7 @@ persona_prompt: "p"
         encoding="utf-8",
     )
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
     ):
         from_env.return_value = MagicMock()
@@ -821,7 +821,7 @@ persona_prompt: "p"
         encoding="utf-8",
     )
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env", return_value=MagicMock()),
+        patch("email_digest.cli.open_gmail_backend", return_value=MagicMock()),
         patch("email_digest.cli.GmailFacade", return_value=MagicMock()),
         patch("email_digest.cli.run_digest") as run_m,
     ):
@@ -855,7 +855,7 @@ def test_digest_candidates_no_topic_returns_2(
 ) -> None:
     from email_digest.cli import main
 
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "sources"])
     assert rc == 2
     from_env.assert_not_called()
@@ -868,7 +868,7 @@ def test_digest_candidates_invalid_since_skips_gmail(tmp_path: Path) -> None:
     td = tmp_path / "tcand_since"
     td.mkdir()
     (td / "solo.yaml").write_text(_minimal_topic_yaml(name="solo"), encoding="utf-8")
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(
             [
                 "digest",
@@ -892,7 +892,7 @@ def test_digest_sources_config_error_skips_gmail(
     td = tmp_path / "tcand_cfg"
     td.mkdir()
     (td / "solo.yaml").write_text("name: only\n", encoding="utf-8")
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(["digest", "sources", "solo", "--topics-dir", str(td)])
     assert rc == 1
     from_env.assert_not_called()
@@ -918,7 +918,7 @@ persona_prompt: "p"
 """,
         encoding="utf-8",
     )
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(
             ["digest", "sources", "solo", "--strict", "--topics-dir", str(td)]
         )
@@ -937,7 +937,7 @@ def test_digest_candidates_all_empty_topics_dir_skips_gmail(
     td.mkdir()
     keep = tmp_path / "keep_cae.json"
     keep.write_text("{}", encoding="utf-8")
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(
             [
                 "digest",
@@ -965,7 +965,7 @@ def test_digest_candidates_all_only_config_errors_skips_gmail_and_keep_list(
     keep = tmp_path / "keep_cab.json"
     keep.write_text("{}", encoding="utf-8")
     with (
-        patch("email_digest.cli.GmailApiBackend.from_env") as from_env,
+        patch("email_digest.cli.open_gmail_backend") as from_env,
         patch("email_digest.cli.load_keep_list") as lk,
     ):
         rc = main(
@@ -991,7 +991,7 @@ def test_digest_candidates_all_invalid_since_skips_gmail(tmp_path: Path) -> None
 
     td = tmp_path / "cand_since_all"
     td.mkdir()
-    with patch("email_digest.cli.GmailApiBackend.from_env") as from_env:
+    with patch("email_digest.cli.open_gmail_backend") as from_env:
         rc = main(
             [
                 "digest",
