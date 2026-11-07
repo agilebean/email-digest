@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -50,14 +52,55 @@ def test_save_live_brave_failure_trace_writes_html_and_error_txt(
     assert "UnsubscribeElementNotFoundError" in errf[0].read_text(encoding="utf-8")
 
 
-def test_cleanup_unsubscribe_trace_png_removes_unsubscribe_prefix_pngs(
-    tmp_path: Path,
-) -> None:
-    matched = tmp_path / "unsubscribe_a_1.png"
+def test_cleanup_prune_removes_unsubscribe_prefix_files_only(tmp_path: Path) -> None:
+    matched = tmp_path / "unsubscribe_a_20260101T000000Z.png"
     other = tmp_path / "other.png"
     matched.write_bytes(b"x")
     other.write_bytes(b"x")
-    n = lbt.cleanup_unsubscribe_trace_png_files(tmp_path)
+    n = lbt.prune_live_brave_traces(tmp_path)
     assert n == 1
     assert not matched.exists()
     assert other.exists()
+
+
+def test_prune_drops_runs_older_than_max_age(tmp_path: Path) -> None:
+    old = tmp_path / "unsubscribe_old_20250101T000000Z.html"
+    old_err = tmp_path / "unsubscribe_old_20250101T000000Z.error.txt"
+    fresh = tmp_path / "unsubscribe_new_20260101T000000Z.html"
+    for p in (old, old_err, fresh):
+        p.write_text("x", encoding="utf-8")
+    olds = time.time() - 40 * 86400
+    os.utime(old, (olds, olds))
+    os.utime(old_err, (olds, olds))
+
+    n = lbt.prune_live_brave_traces(tmp_path, max_age_days=14)
+
+    assert n == 2
+    assert not old.exists() and not old_err.exists()
+    assert fresh.exists()
+
+
+def test_prune_keeps_only_newest_runs(tmp_path: Path) -> None:
+    base = time.time()
+    for i in range(5):
+        p = tmp_path / f"unsubscribe_h{i}_2026010{i + 1}T000000Z.html"
+        p.write_text("x", encoding="utf-8")
+        os.utime(p, (base - (5 - i) * 60, base - (5 - i) * 60))
+
+    n = lbt.prune_live_brave_traces(tmp_path, keep_runs=2, max_age_days=-1)
+
+    assert n == 3
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "unsubscribe_h3_20260104T000000Z.html",
+        "unsubscribe_h4_20260105T000000Z.html",
+    ]
+
+
+def test_default_trace_dir_is_not_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("UNSUBSCRIBE_LIVE_BRAVE_TRACE_DIR", raising=False)
+    d = lbt.live_brave_trace_dir()
+    assert d.name == "traces"
+    assert d.parent.name == ".unsubscribe_page_capture"
+    assert "Downloads" not in str(d)

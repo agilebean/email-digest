@@ -169,7 +169,7 @@ def run_automated_unsubscribe(
     Returns one **truthful** result dict per message (POST 2xx ⇒ ``server-acknowledged``, not unsubscribed).
 
     ``mirror_failure_trace`` (default ``True``) is passed to :func:`batch_browser_unsubscribe` for
-    optional Downloads mirrors on browser failures.
+    failure-trace files under ``.unsubscribe_page_capture/traces``.
     """
     nsel = len(selected)
     if nsel == 0:

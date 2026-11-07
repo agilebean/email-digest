@@ -16,8 +16,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from unsubscribe.browser_helpers import chrome_driver_attach, ensure_brave_running
 from unsubscribe.live_brave_trace import (
-    cleanup_unsubscribe_trace_png_files,
     live_brave_trace_dir,
+    prune_live_brave_traces,
     save_live_brave_failure_trace,
 )
 from unsubscribe.page_confirmation_markers import (
@@ -488,7 +488,8 @@ def batch_browser_unsubscribe(
     (recipient from Gmail ``Delivered-To`` / ``To``) is used for the same purpose.
 
     ``mirror_failure_trace`` (default ``True``) writes HTML + ``.error.txt`` under
-    ``UNSUBSCRIBE_LIVE_BRAVE_TRACE_DIR`` (default ``~/Downloads``) when a job raises.
+    ``UNSUBSCRIBE_LIVE_BRAVE_TRACE_DIR`` (default ``.unsubscribe_page_capture/traces``) when a
+    job raises. The directory is pruned at the end of every run, so traces do not accumulate.
     """
     if not jobs:
         return []
@@ -678,9 +679,9 @@ def batch_browser_unsubscribe(
         except Exception as e:
             logger.warning("Page capture PNG cleanup failed: %s", e)
         try:
-            cleanup_unsubscribe_trace_png_files(live_brave_trace_dir())
+            prune_live_brave_traces(live_brave_trace_dir())
         except Exception as e:
-            logger.warning("Live trace PNG cleanup failed: %s", e)
+            logger.warning("Live trace cleanup failed: %s", e)
         if driver is not None:
             progress.step("Closing WebDriver session (your Brave window stays open).")
             try:
