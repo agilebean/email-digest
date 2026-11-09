@@ -58,6 +58,10 @@ class UnsubscribeElementNotFoundError(RuntimeError):
     """No clickable unsubscribe control matched on the page."""
 
 
+class WindowLostError(RuntimeError):
+    """The tab the driver was driving disappeared (chromedriver: ``no such window``)."""
+
+
 # Needles passed into in-page script (same as preference-center snippets).
 _UNSUBSCRIBE_FROM_ALL_NEEDLES: tuple[str, ...] = PREFERENCE_CENTER_SNIPPETS
 
@@ -261,6 +265,66 @@ def _safe_window_handles(driver: WebDriver) -> list[str]:
         return list(driver.window_handles)
     except Exception:
         return []
+
+
+# chromedriver says these when the tab it was driving is gone: closing it, crashing the
+# renderer, or losing the whole session all surface as «web view not found».
+_WINDOW_LOST_MARKERS: tuple[str, ...] = (
+    "no such window",
+    "web view not found",
+    "webview not found",
+    "target window already closed",
+    "chrome not reachable",
+    "invalid session id",
+    "not connected to devtools",
+)
+
+
+def _is_window_lost(exc: BaseException) -> bool:
+    """True when ``exc`` means the tab is gone, not that the page lacked a control."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _WINDOW_LOST_MARKERS)
+
+
+def _window_alive(driver: WebDriver, handle: str | None) -> bool:
+    """True while the browser still lists ``handle`` (``None`` means no specific tab)."""
+    if handle is None:
+        return True
+    handles = _safe_window_handles(driver)
+    return bool(handles) and handle in handles
+
+
+def _ensure_job_window(driver: WebDriver, handle: str | None) -> None:
+    """Fail the job as a lost tab, instead of clicking into a window that no longer exists."""
+    if _window_alive(driver, handle):
+        return
+    raise WindowLostError(
+        "the tab opened for this link was closed under the driver "
+        "(no such window: web view not found). The page was never finished"
+    )
+
+
+def _recover_after_window_loss(driver: WebDriver) -> str | None:
+    """Put the driver on a surviving window so the next job can open its own tab.
+
+    Returns that handle, or ``None`` when no window is left (the whole session is gone).
+    """
+    handles = _safe_window_handles(driver)
+    if not handles:
+        return None
+    try:
+        current = driver.current_window_handle
+        if current in handles:
+            return current
+    except Exception:
+        pass
+    for handle in reversed(handles):
+        try:
+            driver.switch_to.window(handle)
+            return handle
+        except Exception:
+            continue
+    return None
 
 
 def _click_unsubscribe_once_main_or_iframes(driver: WebDriver) -> None:
@@ -510,6 +574,7 @@ def batch_browser_unsubscribe(
         )
     try:
         driver = chrome_driver_attach(debugger_address=debugger_address)
+        browser_lost = False
         for idx, job in enumerate(jobs, start=1):
             email_index, subject, sender, url, mailbox_hint = job
             host = urlparse(url).hostname or url[:48]
@@ -525,14 +590,38 @@ def batch_browser_unsubscribe(
                 mailbox_hint,
             )
 
+            if browser_lost:
+                results.append(
+                    _result_row(
+                        email_index,
+                        subject,
+                        sender,
+                        method="browser",
+                        status="failed",
+                        detail=(
+                            "browser → ✗ failed: the Brave session was lost earlier in this "
+                            "run, so this link was never opened. Re-run it"
+                        ),
+                        capture_session_path=(
+                            str(capture_session.session_dir) if capture_session else None
+                        ),
+                    )
+                )
+                continue
+
+            # The handle this job drives; ``_record_step`` fails the job once it disappears.
+            job_window: dict[str, str | None] = {"handle": None}
+
             def _record_step(
                 step: str,
                 *,
                 _idx: int = idx,
                 _url: str = url,
                 _job: BrowserUnsubscribeJob = job_row,
+                _window: dict[str, str | None] = job_window,
             ) -> None:
                 if capture_session is not None and driver is not None:
+                    _ensure_job_window(driver, _window["handle"])
                     capture_session.record_snapshot(
                         driver,
                         job_batch_index=_idx,
@@ -565,6 +654,8 @@ def batch_browser_unsubscribe(
                         driver.switch_to.window(opened[-1])
                     except Exception:
                         pass
+                job_window["handle"] = driver.current_window_handle
+                _ensure_job_window(driver, job_window["handle"])
 
                 if capture_session is not None:
                     capture_session.record_snapshot(
@@ -582,6 +673,7 @@ def batch_browser_unsubscribe(
                     record_step=_record_step,
                 )
                 time.sleep(min(1.5, timeout_per_url_s / 6))
+                _ensure_job_window(driver, job_window["handle"])
                 if capture_session is not None:
                     capture_session.record_snapshot(
                         driver,
@@ -629,6 +721,7 @@ def batch_browser_unsubscribe(
                     f"Unsubscribe action {idx}/{len(jobs)} ({host}) — finished."
                 )
             except Exception as exc:
+                lost = isinstance(exc, WindowLostError) or _is_window_lost(exc)
                 logger.warning("Unsubscribe failed for %s: %s", url, exc)
                 page_text = ""
                 if capture_session is not None and driver is not None:
@@ -647,6 +740,14 @@ def batch_browser_unsubscribe(
                 msg = str(exc) or type(exc).__name__
                 page_snippet = _normalize_text_snippet(page_text)
                 capture_path = str(capture_session.session_dir) if capture_session else None
+                if lost:
+                    detail = (
+                        "browser → ✗ failed: the tab closed under the driver before the page "
+                        "was handled, so nothing was clicked on this link "
+                        f"({msg.splitlines()[0][:160]})"
+                    )
+                else:
+                    detail = f"browser → ✗ failed: {msg}"
                 results.append(
                     _result_row(
                         email_index,
@@ -654,7 +755,7 @@ def batch_browser_unsubscribe(
                         sender,
                         method="browser",
                         status="failed",
-                        detail=f"browser → ✗ failed: {msg}",
+                        detail=detail,
                         capture_session_path=capture_path,
                         page_text_snippet=page_snippet,
                     )
@@ -662,15 +763,24 @@ def batch_browser_unsubscribe(
                 progress.step(
                     f"Unsubscribe action {idx}/{len(jobs)} ({host}) — failed."
                 )
-                try:
-                    save_live_brave_failure_trace(
-                        driver,
-                        label=_url_trace_label(url),
-                        error=msg,
-                        enabled=mirror_failure_trace,
-                    )
-                except Exception as trace_exc:
-                    logger.warning("Could not save trace: %s", trace_exc)
+                if lost:
+                    # A dead handle breaks every later Selenium call, so take the driver
+                    # back to a live window before the next job opens its own tab.
+                    if _recover_after_window_loss(driver) is None:
+                        browser_lost = True
+                        logger.warning(
+                            "No window left after %s; skipping the remaining links", url
+                        )
+                else:
+                    try:
+                        save_live_brave_failure_trace(
+                            driver,
+                            label=_url_trace_label(url),
+                            error=msg,
+                            enabled=mirror_failure_trace,
+                        )
+                    except Exception as trace_exc:
+                        logger.warning("Could not save trace: %s", trace_exc)
                 continue
         _finalize_browser_results_from_saved_html(results, jobs, capture_session)
     finally:

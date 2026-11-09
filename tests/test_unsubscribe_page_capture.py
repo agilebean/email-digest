@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
@@ -304,3 +304,47 @@ def test_cleanup_all_page_capture_png_skips_when_screenshots_enabled(
     n = unsubscribe_page_capture.cleanup_all_page_capture_png_sessions_if_disabled()
     assert n == 0
     assert png.exists()
+
+
+def test_record_snapshot_names_a_closed_tab_and_writes_no_empty_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tab closed under the driver used to leave a 0-byte page that read as a silent site."""
+    monkeypatch.setattr(
+        unsubscribe_page_capture,
+        "page_capture_base_dir",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(unsubscribe_page_capture, "PAGE_CAPTURE_WAIT_S", 0.0)
+    jobs: list[tuple[int | None, str, str, str, str | None]] = [
+        (2, "Subj", "S <s@s.com>", "https://i.nl/1", None),
+    ]
+    session = PageCaptureSession.create(jobs)
+
+    driver = MagicMock()
+    gone = Exception(
+        "Message: no such window: target window already closed\n"
+        "from unknown error: web view not found"
+    )
+    type(driver).page_source = PropertyMock(side_effect=gone)
+    type(driver).current_url = PropertyMock(side_effect=gone)
+    type(driver).title = PropertyMock(side_effect=gone)
+    driver.execute_script.side_effect = gone
+
+    session.record_snapshot(
+        driver,
+        job_batch_index=1,
+        step="after_maybe_unsubscribe_from_all_click",
+        initial_url="https://i.nl/1",
+        job=jobs[0],
+        error="no such window: target window already closed",
+    )
+
+    man = json.loads((session.session_dir / "manifest.json").read_text(encoding="utf-8"))
+    snap = man["snapshots"][0]
+    assert snap["quality_note"].startswith("window_unavailable")
+    assert snap["files"]["html"] == ""
+    assert snap["files"]["visible_text"] == ""
+    assert snap["error"].startswith("no such window")
+    assert list(session.session_dir.glob("*.html")) == []

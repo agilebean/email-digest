@@ -8,9 +8,13 @@ from unittest.mock import MagicMock, PropertyMock, patch
 from unsubscribe.browser_unsubscribe import (
     UnsubscribeElementNotFoundError,
     UnsubscribeFlowCase,
+    WindowLostError,
+    _ensure_job_window,
+    _is_window_lost,
     _maybe_click_unsubscribe_from_all,
     _maybe_fill_visible_email_field,
     _page_suggests_unsubscribed_confirmed,
+    _recover_after_window_loss,
     _try_click_unsubscribe_on_page,
     batch_browser_unsubscribe,
     _find_unsubscribe_element,
@@ -56,6 +60,7 @@ def _job(
 def test_batch_attach_once_get_each_url_quit_once() -> None:
     mock_driver = MagicMock()
     mock_driver.window_handles = ["main"]
+    mock_driver.current_window_handle = "main"
     mock_el = _visible_el()
     urls = ["https://one.example/unsub", "https://two.example/unsub"]
     jobs = [_job(1, urls[0]), _job(2, urls[1])]
@@ -97,6 +102,7 @@ def test_batch_attach_once_get_each_url_quit_once() -> None:
 def test_batch_failure_on_one_url_continues_and_quits_once() -> None:
     mock_driver = MagicMock()
     mock_driver.window_handles = ["main"]
+    mock_driver.current_window_handle = "main"
 
     calls = {"n": 0}
 
@@ -159,10 +165,11 @@ def test_batch_does_not_switch_to_a_preexisting_window() -> None:
     closed" when that foreign tab went away.
     """
     mock_driver = MagicMock()
-    # Same two windows before and after the navigation: our tab plus a user's tab.
+    # Our tab plus a user's tab, both alive for the whole job.
     type(mock_driver).window_handles = PropertyMock(
-        side_effect=[["ours", "users-claude"], ["ours", "users-claude"]]
+        side_effect=[["ours", "users-claude"]] * 4
     )
+    mock_driver.current_window_handle = "ours"
     jobs = [_job(2, "https://app.loops.so/unsubscribe/abc")]
 
     with (
@@ -190,6 +197,7 @@ def test_batch_opens_a_fresh_tab_per_job_and_never_reuses_current() -> None:
     """
     mock_driver = MagicMock()
     mock_driver.window_handles = ["user-tab-1", "user-tab-2"]
+    mock_driver.current_window_handle = "user-tab-1"
     jobs = [_job(1, "https://one.example/u"), _job(2, "https://two.example/u")]
 
     with (
@@ -213,10 +221,15 @@ def test_batch_opens_a_fresh_tab_per_job_and_never_reuses_current() -> None:
 
 def test_batch_follows_a_window_the_navigation_opened() -> None:
     """A popup opened by the navigation is still followed (the original intent)."""
+    handles = ["ours"]
+
+    def _get(_url: str) -> None:
+        handles.append("popup")
+
     mock_driver = MagicMock()
-    type(mock_driver).window_handles = PropertyMock(
-        side_effect=[["ours"], ["ours", "popup"]]
-    )
+    mock_driver.window_handles = handles
+    mock_driver.get.side_effect = _get
+    type(mock_driver).current_window_handle = PropertyMock(return_value="popup")
     jobs = [_job(2, "https://lists.example/popup-unsub")]
 
     with (
@@ -511,6 +524,7 @@ def test_find_unsubscribe_finds_submit_input_via_script() -> None:
 def test_batch_uses_job_mailbox_hint_when_env_absent() -> None:
     mock_driver = MagicMock()
     mock_driver.window_handles = ["main"]
+    mock_driver.current_window_handle = "main"
     jobs = [(1, "S", "snd", "https://wizz.example/u", "hint@mailbox.test")]
     with (
         patch(
@@ -540,6 +554,7 @@ def test_batch_uses_job_mailbox_hint_when_env_absent() -> None:
 def test_batch_prefers_env_subscriber_over_job_mailbox_hint() -> None:
     mock_driver = MagicMock()
     mock_driver.window_handles = ["main"]
+    mock_driver.current_window_handle = "main"
     jobs = [(1, "S", "snd", "https://wizz.example/u", "hint@mailbox.test")]
     with (
         patch(
@@ -570,6 +585,7 @@ def test_batch_prefers_env_subscriber_over_job_mailbox_hint() -> None:
 def test_batch_forwards_subscriber_email_to_page_handler() -> None:
     mock_driver = MagicMock()
     mock_driver.window_handles = ["main"]
+    mock_driver.current_window_handle = "main"
     jobs = [_job(1, "https://pref.example/unsub")]
     with (
         patch(
@@ -595,3 +611,131 @@ def test_batch_forwards_subscriber_email_to_page_handler() -> None:
             subscriber_email="subscriber@dmv.example",
         )
     assert mock_try.call_args.kwargs.get("subscriber_email") == "subscriber@dmv.example"
+
+
+# --- The tab closing under the driver (2026-11-09 run: "no such window: web view not found") ---
+
+
+def test_is_window_lost_recognises_the_chromedriver_message() -> None:
+    """The exact text a closed tab raises, versus a page that simply has no control."""
+    exc = Exception(
+        "Message: no such window: target window already closed\n"
+        "from unknown error: web view not found\n"
+        "  (Session info: chrome=157.0.8103.39)"
+    )
+    assert _is_window_lost(exc) is True
+    assert _is_window_lost(WindowLostError("tab gone")) is False
+    assert (
+        _is_window_lost(UnsubscribeElementNotFoundError("No unsubscribe control found"))
+        is False
+    )
+
+
+def test_ensure_job_window_raises_only_when_the_handle_is_gone() -> None:
+    driver = MagicMock()
+    driver.window_handles = ["ours"]
+    _ensure_job_window(driver, "ours")
+    _ensure_job_window(driver, None)
+    with pytest.raises(WindowLostError):
+        _ensure_job_window(driver, "closed")
+
+
+def test_recover_after_window_loss_switches_to_a_surviving_window() -> None:
+    driver = MagicMock()
+    driver.window_handles = ["user-1", "user-2"]
+    type(driver).current_window_handle = PropertyMock(
+        side_effect=Exception("no such window: target window already closed")
+    )
+    assert _recover_after_window_loss(driver) == "user-2"
+    driver.switch_to.window.assert_called_once_with("user-2")
+
+
+def test_recover_after_window_loss_returns_none_without_windows() -> None:
+    driver = MagicMock()
+    driver.window_handles = []
+    assert _recover_after_window_loss(driver) is None
+
+
+def test_batch_reports_a_closed_tab_and_still_runs_the_next_job() -> None:
+    """One vanished tab must name its cause and must not cost the rest of the batch."""
+    mock_driver = MagicMock()
+    mock_driver.window_handles = ["ours-1", "users-tab"]
+    mock_driver.current_window_handle = "ours-1"
+    jobs = [
+        _job(1, "https://gone.example/u"),
+        _job(2, "https://good.example/u"),
+    ]
+    closed = Exception(
+        "Message: no such window: target window already closed\n"
+        "from unknown error: web view not found"
+    )
+
+    with (
+        patch("unsubscribe.browser_unsubscribe.ensure_brave_running"),
+        patch(
+            "unsubscribe.browser_unsubscribe.chrome_driver_attach",
+            return_value=mock_driver,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe._try_click_unsubscribe_on_page",
+            side_effect=[closed, None],
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe._page_suggests_unsubscribed_confirmed",
+            return_value=True,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe.save_live_brave_failure_trace",
+        ) as mock_trace,
+    ):
+        out = batch_browser_unsubscribe(
+            jobs, debugger_address="127.0.0.1:9222", quiet=True
+        )
+
+    assert out[0]["status"] == "failed"
+    assert "tab closed under the driver" in out[0]["detail"]
+    assert "No unsubscribe control" not in out[0]["detail"]
+    assert out[1]["status"] == "confirmed"
+    mock_driver.get.assert_any_call(jobs[1][3])
+    mock_trace.assert_not_called()
+
+
+def test_batch_marks_the_remaining_links_when_no_window_is_left() -> None:
+    """With the whole Brave session gone, later jobs say so instead of raising again."""
+    mock_driver = MagicMock()
+    type(mock_driver).window_handles = PropertyMock(
+        side_effect=[
+            ["ours"],  # job 1 handles_before
+            ["ours"],  # job 1 popup check
+            [],  # recovery read: nothing survived
+        ]
+    )
+    mock_driver.current_window_handle = "ours"
+    jobs = [
+        _job(1, "https://gone.example/u"),
+        _job(2, "https://later.example/u"),
+    ]
+    closed = Exception("Message: no such window: target window already closed")
+
+    with (
+        patch("unsubscribe.browser_unsubscribe.ensure_brave_running"),
+        patch(
+            "unsubscribe.browser_unsubscribe.chrome_driver_attach",
+            return_value=mock_driver,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe._try_click_unsubscribe_on_page",
+            side_effect=closed,
+        ),
+        patch(
+            "unsubscribe.browser_unsubscribe.save_live_brave_failure_trace",
+        ),
+    ):
+        out = batch_browser_unsubscribe(
+            jobs, debugger_address="127.0.0.1:9222", quiet=True
+        )
+
+    assert out[0]["status"] == "failed"
+    assert out[1]["status"] == "failed"
+    assert "Brave session was lost" in out[1]["detail"]
+    mock_driver.get.assert_called_once_with(jobs[0][3])

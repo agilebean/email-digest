@@ -478,8 +478,16 @@ class PageCaptureSession:
         )
 
         quality_note: str | None = None
+        # A tab that was closed under the driver answers every read with nothing. Writing that
+        # as a 0-byte "page" makes it look like a silent site; name the cause instead.
+        window_unavailable = not html_full.strip() and not visible_raw.strip()
         if duplicate:
             quality_note = "duplicate_of_previous_snapshot"
+        elif window_unavailable:
+            quality_note = (
+                "window_unavailable: the driver returned no URL, title, text or HTML for this "
+                "tab (closed under the driver, or its webview detached)"
+            )
         elif len(visible_raw.strip()) < 40 and len(html_full) < 500:
             quality_note = (
                 "thin_snapshot: low visible text and small HTML "
@@ -490,6 +498,9 @@ class PageCaptureSession:
         if duplicate:
             prev_stem = f"{self._seq - 1:03d}_job{job_batch_index}_{safe_step}"
             files["html"] = ""  # no new file; identical to previous snapshot
+            files["visible_text"] = ""
+        elif window_unavailable:
+            files["html"] = ""  # nothing to save; the tab is gone
             files["visible_text"] = ""
         else:
             visible_for_file = visible_raw[:_VISIBLE_FILE_MAX_CHARS]
@@ -509,7 +520,7 @@ class PageCaptureSession:
                 logger.warning("Could not save capture HTML %s: %s", html_path, exc)
                 files["html"] = ""
 
-        if not duplicate and page_capture_include_png():
+        if not duplicate and not window_unavailable and page_capture_include_png():
             png_name = f"{stem}.png"
             png_path = self.session_dir / png_name
             try:
