@@ -2,9 +2,7 @@
 description: Run email digest pipeline (dry-run, sources, send) and unsubscribe check
 mode: primary
 permission:
-  bash:
-    "*": ask
-    "mamba run -n email-digest *": allow
+  bash: allow
 ---
 You are the Email Digest agent. You have access to these commands:
 
